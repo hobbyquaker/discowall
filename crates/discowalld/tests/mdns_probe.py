@@ -9,7 +9,14 @@
   mdns_probe.py respond <iface-addr> <timeout-s> <inst> <svc> <host> <ip>
                                                             answer the first PTR query by unicast (legacy style)
   An <iface-addr> of the form v6:<ifname> uses IPv6 (ff02::fb) on that interface.
+  mdns_probe.py ssdp-notify <iface-addr> <uuid> <nt> <location>  multicast an ssdp:alive on 1900
+  mdns_probe.py ssdp-recv <iface-addr> <timeout-s>                print the first SSDP packet on 1900
+  mdns_probe.py ssdp-search <iface-addr> <st> <timeout-s>         M-SEARCH from an ephemeral port, print the answer
+  mdns_probe.py ssdp-respond <iface-addr> <timeout-s> <uuid> <st> <location>
+                                                                  answer the first M-SEARCH by unicast
 """
+SSDP_GROUP = "239.255.255.250"
+SSDP_PORT = 1900
 import socket
 import struct
 import sys
@@ -40,6 +47,39 @@ def open_sock(addr, port=PORT):
     if addr.startswith("v6:"):
         return sock6(addr[3:], port)
     return sock(addr, port), (GROUP, PORT)
+
+
+def ssdp_sock(addr, port=SSDP_PORT):
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+    s.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 4)
+    s.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 0)
+    s.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(addr))
+    s.bind(("0.0.0.0", port))
+    s.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP,
+                 struct.pack("4s4s", socket.inet_aton(SSDP_GROUP), socket.inet_aton(addr)))
+    return s
+
+
+def ssdp_alive(uuid, nt, location):
+    return (f"NOTIFY * HTTP/1.1\r\nHOST: {SSDP_GROUP}:{SSDP_PORT}\r\nCACHE-CONTROL: max-age=1800\r\n"
+            f"LOCATION: {location}\r\nNT: {nt}\r\nNTS: ssdp:alive\r\nSERVER: probe/1\r\nUSN: {uuid}::{nt}\r\n\r\n").encode()
+
+
+def ssdp_search(st):
+    return (f"M-SEARCH * HTTP/1.1\r\nHOST: {SSDP_GROUP}:{SSDP_PORT}\r\nMAN: \"ssdp:discover\"\r\nMX: 1\r\nST: {st}\r\n\r\n").encode()
+
+
+def ssdp_describe(data):
+    lines = data.decode(errors="replace").split("\r\n")
+    headers = {}
+    for line in lines[1:]:
+        if ":" in line:
+            k, v = line.split(":", 1)
+            headers[k.strip().upper()] = v.strip()
+    keys = ["NTS", "NT", "ST", "USN", "LOCATION"]
+    return lines[0] + " " + " ".join(f"{k}={headers[k]}" for k in keys if k in headers)
 
 
 def sock(addr, port=PORT):
@@ -114,6 +154,45 @@ def describe(data):
 
 def main():
     mode, addr = sys.argv[1], sys.argv[2]
+    if mode == "ssdp-notify":
+        ssdp_sock(addr).sendto(ssdp_alive(*sys.argv[3:6]), (SSDP_GROUP, SSDP_PORT))
+        return
+    if mode == "ssdp-recv":
+        s = ssdp_sock(addr)
+        s.settimeout(float(sys.argv[3]))
+        try:
+            data, src = s.recvfrom(9000)
+            print(f"{src[0]}:{src[1]} {ssdp_describe(data)}", flush=True)
+        except socket.timeout:
+            print("timeout", flush=True)
+        return
+    if mode == "ssdp-search":
+        s = ssdp_sock(addr, 0)
+        s.sendto(ssdp_search(sys.argv[3]), (SSDP_GROUP, SSDP_PORT))
+        s.settimeout(float(sys.argv[4]))
+        try:
+            data, src = s.recvfrom(9000)
+            print(f"{src[0]}:{src[1]} {ssdp_describe(data)}", flush=True)
+        except socket.timeout:
+            print("timeout", flush=True)
+        return
+    if mode == "ssdp-respond":
+        s = ssdp_sock(addr)
+        s.settimeout(float(sys.argv[3]))
+        uuid, st, location = sys.argv[4:7]
+        try:
+            while True:
+                data, src = s.recvfrom(9000)
+                if not data.startswith(b"M-SEARCH"):
+                    continue
+                reply = (f"HTTP/1.1 200 OK\r\nCACHE-CONTROL: max-age=1800\r\nEXT:\r\nLOCATION: {location}\r\n"
+                         f"SERVER: probe/1\r\nST: {st}\r\nUSN: {uuid}::{st}\r\n\r\n").encode()
+                s.sendto(reply, src)
+                print(f"answered {src[0]}:{src[1]}", flush=True)
+                return
+        except socket.timeout:
+            print("timeout", flush=True)
+        return
     if mode == "legacy":
         # An ephemeral port: the responder (or the proxy) answers by unicast.
         s, group = open_sock(addr, 0)

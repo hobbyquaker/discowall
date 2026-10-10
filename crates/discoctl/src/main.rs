@@ -3,8 +3,8 @@
 use anyhow::{bail, Context, Result};
 use clap::{Args as ClapArgs, Parser, Subcommand};
 use discowall_proto::{
-    Action, HostView, PacketKind, Request, Response, RuleList, RuleSpec, ServiceView, StatsView,
-    Status, TestResult, TestSpec, WatchEvent,
+    Action, HostView, PacketKind, Proto, Request, Response, RuleList, RuleSpec, ServiceView,
+    StatsView, Status, TestResult, TestSpec, WatchEvent,
 };
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
@@ -26,7 +26,8 @@ struct Cli {
 
 const RULE_SYNTAX: &str = "\
 Rule syntax (rule add / rule insert / rule test):
-  [in <iface>] [out <iface>] [src <addr|prefix>[,…]] [kind query|probe|response|announce[,…]]
+  [proto mdns|ssdp[,…]] [in <iface>] [out <iface>] [src <addr|prefix>[,…]]
+  [kind query|probe|response|announce[,…]]
   [service <glob>[,…]] [instance <glob>[,…]] [host <glob>[,…]] [rrtype <type>[,…]]
   accept|drop [log] [comment <text>]
 Every match left out matches everything; a list is any-of. Names are matched without their
@@ -158,6 +159,12 @@ fn parse_rule(tokens: &[String]) -> Result<RuleSpec> {
                 .ok_or_else(|| usage(format!("`{t}` needs a value")))
         };
         match t.as_str() {
+            "proto" => {
+                spec.proto = list(value()?)
+                    .iter()
+                    .map(|p| p.parse::<Proto>().map_err(usage))
+                    .collect::<Result<_>>()?
+            }
             "in" => spec.in_iface = Some(value()?.clone()),
             "out" => spec.out = Some(value()?.clone()),
             "src" => spec.src = list(value()?),
@@ -195,6 +202,7 @@ fn parse_test(tokens: &[String]) -> Result<TestSpec> {
             .next()
             .ok_or_else(|| usage(format!("`{k}` needs a value")))?;
         match k.as_str() {
+            "proto" => t.proto = v.parse::<Proto>().map_err(usage)?,
             "in" => t.in_iface = v.clone(),
             "out" => t.out = v.clone(),
             "src" => {
@@ -339,8 +347,9 @@ fn format_event(ev: &WatchEvent) -> String {
         .collect::<Vec<_>>()
         .join("  ");
     format!(
-        "{h:02}:{m:02}:{s:02}.{:03} {:<8} {:<21} {:<9} {:<40} -> {}",
+        "{h:02}:{m:02}:{s:02}.{:03} {:<4} {:<8} {:<21} {:<10} {:<40} -> {}",
         ev.ts_ms % 1000,
+        ev.proto,
         ev.iface,
         ev.src,
         ev.kind,
@@ -512,6 +521,9 @@ mod tests {
             r.to_string(),
             "in iot out lan kind response,announce host bridge,printer* accept log"
         );
+        let r = parse_rule(&toks("proto ssdp in iot kind announce service urn:schemas-upnp-org:device:MediaRenderer:1 accept")).unwrap();
+        assert_eq!(r.proto, vec![Proto::Ssdp]);
+        assert_eq!(r.to_string(), "proto ssdp in iot kind announce service urn:schemas-upnp-org:device:MediaRenderer:1 accept");
         let r = parse_rule(&toks("src 192.168.30.0/24,fd00::/8 rrtype AAAA drop")).unwrap();
         assert_eq!(r.src, vec!["192.168.30.0/24", "fd00::/8"]);
         assert_eq!(r.rrtype, vec!["AAAA"]);

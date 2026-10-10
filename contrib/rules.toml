@@ -32,3 +32,20 @@ in = "iot"
 kind = ["response", "announce"]
 service = ["_ipp._tcp", "_ipps._tcp", "_printer._tcp", "_pdl-datastream._tcp"]
 action = "accept"
+
+# UPnP (SSDP): the media renderer in the IoT network is visible from the LAN, and the LAN may search there.
+[[rule]]
+proto = ["ssdp"]
+in = "lan"
+out = "iot"
+kind = ["query"]
+action = "accept"
+
+[[rule]]
+proto = ["ssdp"]
+in = "iot"
+out = "lan"
+kind = ["announce", "response"]
+service = ["urn:schemas-upnp-org:device:MediaRenderer:1", "upnp:rootdevice"]
+instance = ["uuid:rincon_*"]
+action = "accept"

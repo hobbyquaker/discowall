@@ -34,6 +34,14 @@ The newest five dated entries; older ones move to `handoff-archive/<date>.md`.
   first); the README's Roadmap list is hand-maintained in both languages and must be updated with every
   `roadmap.py state`; the release workflow and the OpenWrt package are untested.
 
+## 2026-10-10 (late night) — SSDP in, version set to 0.0.1 for the first release
+
+- **Task 8 (SSDP)** 🕵️ on the maintainer's word: second socket pair on 1900, parser, notifications under the rules,
+  searches proxied with unicast relay, `proto` match, UPnP recipe in the READMEs, namespace test end to end. 44
+  tests. The maintainer also asked for a release as **0.0.1** once CI is green (the workspace version is 0.0.1
+  now; the tag `v0.0.1` runs the release workflow for the first time) and for research on end-to-end testing in
+  his Proxmox environment.
+
 ## 2026-10-10 (night) — P2, P3, P4 built; v1 is code-complete, untested on a router
 
 - **Task 4 (P2)** 🕵️: `discoctl watch` (broadcast of per-packet decisions, streamed as JSON lines), `services`,

@@ -12,12 +12,13 @@ mod reflector;
 #[allow(dead_code)]
 mod rules;
 mod socket;
+mod ssdp;
 
 use anyhow::{Context, Result};
 use clap::Parser;
 use config::Config;
 use control::CoreQuery;
-use socket::{Family, MdnsSocket, SocketFactory};
+use socket::{Family, MdnsSocket, Proto, SocketFactory};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -79,13 +80,26 @@ fn main() -> Result<()> {
 
 async fn run(config: Config, config_path: String) -> Result<()> {
     let mut sockets: Vec<Arc<dyn MdnsSocket>> = Vec::new();
-    if config.ipv4 {
-        sockets.push(Arc::new(socket::linux::LinuxSocket::open(Family::V4)?));
+    let protos: Vec<Proto> = if config.ssdp {
+        vec![Proto::Mdns, Proto::Ssdp]
+    } else {
+        vec![Proto::Mdns]
+    };
+    for proto in protos {
+        if config.ipv4 {
+            sockets.push(Arc::new(socket::linux::LinuxSocket::open(
+                proto,
+                Family::V4,
+            )?));
+        }
+        if config.ipv6 {
+            sockets.push(Arc::new(socket::linux::LinuxSocket::open(
+                proto,
+                Family::V6,
+            )?));
+        }
     }
-    if config.ipv6 {
-        sockets.push(Arc::new(socket::linux::LinuxSocket::open(Family::V6)?));
-    }
-    info!(interfaces = ?config.interfaces, ipv4 = config.ipv4, ipv6 = config.ipv6, "discowalld {} starting", env!("CARGO_PKG_VERSION"));
+    info!(interfaces = ?config.interfaces, ipv4 = config.ipv4, ipv6 = config.ipv6, ssdp = config.ssdp, "discowalld {} starting", env!("CARGO_PKG_VERSION"));
 
     let listener = control::bind(&config.control_socket)?;
     let (packet_tx, mut packet_rx) = mpsc::channel(1024);
@@ -112,11 +126,11 @@ async fn run(config: Config, config_path: String) -> Result<()> {
             error!("interface watcher ended: {e:#}");
         }
     });
-    let factory: SocketFactory = Arc::new(|family, ephemeral| {
+    let factory: SocketFactory = Arc::new(|proto, family, ephemeral| {
         let s = if ephemeral {
-            socket::linux::LinuxSocket::open_ephemeral(family)?
+            socket::linux::LinuxSocket::open_ephemeral(proto, family)?
         } else {
-            socket::linux::LinuxSocket::open(family)?
+            socket::linux::LinuxSocket::open(proto, family)?
         };
         Ok(Arc::new(s) as Arc<dyn MdnsSocket>)
     });

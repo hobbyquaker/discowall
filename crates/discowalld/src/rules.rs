@@ -3,7 +3,7 @@
 //! with the names the packet and the host table attribute to it (research 3.4, 3.5).
 
 use anyhow::{bail, Context, Result};
-use discowall_proto::{Action, PacketKind, RuleList, RuleSet, RuleSpec, RuleView};
+use discowall_proto::{Action, PacketKind, Proto, RuleList, RuleSet, RuleSpec, RuleView};
 use hickory_proto::rr::RecordType;
 use std::net::IpAddr;
 use std::str::FromStr;
@@ -102,6 +102,7 @@ pub struct Rule {
 /// What one question or record looks like to the chain.
 #[derive(Debug, Clone, Default)]
 pub struct Subject<'a> {
+    pub proto: Proto,
     pub in_iface: &'a str,
     pub out_iface: &'a str,
     pub src: Option<IpAddr>,
@@ -152,6 +153,9 @@ impl Rule {
     }
 
     pub fn matches(&self, s: &Subject) -> bool {
+        if !self.spec.proto.is_empty() && !self.spec.proto.contains(&s.proto) {
+            return false;
+        }
         if self
             .spec
             .in_iface
@@ -474,6 +478,19 @@ mod tests {
         s.src = None;
         s.rrtype = None;
         assert_eq!(chain.decide(&s).rule, None);
+    }
+
+    #[test]
+    fn proto_match() {
+        let set: RuleSet =
+            toml::from_str("default = \"drop\"\n[[rule]]\nproto = [\"ssdp\"]\naction = \"accept\"")
+                .unwrap();
+        let mut chain = Chain::compile(&set).unwrap();
+        let mut s = subject("iot", "lan", PacketKind::Announce);
+        assert_eq!(chain.decide(&s).action, Action::Drop);
+        s.proto = Proto::Ssdp;
+        assert_eq!(chain.decide(&s).action, Action::Accept);
+        assert_eq!(chain.rules[0].spec.to_string(), "proto ssdp accept");
     }
 
     #[test]

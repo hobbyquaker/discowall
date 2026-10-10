@@ -9,9 +9,29 @@
 use anyhow::{Context, Result};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
+pub use discowall_proto::Proto;
+
 pub const MDNS_PORT: u16 = 5353;
 pub const MDNS_V4: Ipv4Addr = Ipv4Addr::new(224, 0, 0, 251);
 pub const MDNS_V6: Ipv6Addr = Ipv6Addr::new(0xff02, 0, 0, 0, 0, 0, 0, 0xfb);
+pub const SSDP_PORT: u16 = 1900;
+pub const SSDP_V4: Ipv4Addr = Ipv4Addr::new(239, 255, 255, 250);
+pub const SSDP_V6: Ipv6Addr = Ipv6Addr::new(0xff02, 0, 0, 0, 0, 0, 0, 0xc);
+
+pub fn port_of(proto: Proto) -> u16 {
+    match proto {
+        Proto::Mdns => MDNS_PORT,
+        Proto::Ssdp => SSDP_PORT,
+    }
+}
+
+/// mDNS wants TTL 255 (RFC 6762 §11); UPnP recommends a small TTL (2 in the spec, 4 is common).
+fn ttl_of(proto: Proto) -> u32 {
+    match proto {
+        Proto::Mdns => 255,
+        Proto::Ssdp => 4,
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Family {
@@ -22,6 +42,7 @@ pub enum Family {
 /// A packet as it arrived: the payload, the original source, the interface index.
 #[derive(Debug, Clone)]
 pub struct Received {
+    pub proto: Proto,
     pub family: Family,
     pub data: Vec<u8>,
     pub src: SocketAddr,
@@ -37,19 +58,22 @@ pub struct ReplyTo {
     pub ifindex: u32,
 }
 
-pub fn group_addr(family: Family) -> SocketAddr {
-    match family {
-        Family::V4 => SocketAddr::new(IpAddr::V4(MDNS_V4), MDNS_PORT),
-        Family::V6 => SocketAddr::new(IpAddr::V6(MDNS_V6), MDNS_PORT),
+pub fn group_addr(proto: Proto, family: Family) -> SocketAddr {
+    match (proto, family) {
+        (Proto::Mdns, Family::V4) => SocketAddr::new(IpAddr::V4(MDNS_V4), MDNS_PORT),
+        (Proto::Mdns, Family::V6) => SocketAddr::new(IpAddr::V6(MDNS_V6), MDNS_PORT),
+        (Proto::Ssdp, Family::V4) => SocketAddr::new(IpAddr::V4(SSDP_V4), SSDP_PORT),
+        (Proto::Ssdp, Family::V6) => SocketAddr::new(IpAddr::V6(SSDP_V6), SSDP_PORT),
     }
 }
 
 /// One mDNS socket of one address family.
 pub trait MdnsSocket: Send + Sync {
+    fn proto(&self) -> Proto;
     fn family(&self) -> Family;
     /// Blocks until a packet arrives.
     fn recv(&self) -> Result<Received>;
-    /// Sends `data` to the mDNS group on the interface `ifindex`.
+    /// Sends `data` to the protocol's group on the interface `ifindex`.
     fn send_multicast(&self, data: &[u8], ifindex: u32) -> Result<()>;
     /// Sends `data` to one host on the interface `ifindex` (a legacy response, RFC 6762 §6.7).
     fn send_unicast(&self, data: &[u8], dst: SocketAddr, ifindex: u32) -> Result<()>;
@@ -60,8 +84,9 @@ pub trait MdnsSocket: Send + Sync {
 }
 
 /// Opens sockets: the two long-lived ones at start, an ephemeral one per proxied legacy query.
-pub type SocketFactory =
-    std::sync::Arc<dyn Fn(Family, bool) -> Result<std::sync::Arc<dyn MdnsSocket>> + Send + Sync>;
+pub type SocketFactory = std::sync::Arc<
+    dyn Fn(Proto, Family, bool) -> Result<std::sync::Arc<dyn MdnsSocket>> + Send + Sync,
+>;
 
 #[cfg(target_os = "linux")]
 pub mod linux {
@@ -75,6 +100,7 @@ pub mod linux {
     use std::os::fd::AsRawFd;
 
     pub struct LinuxSocket {
+        proto: Proto,
         family: Family,
         sock: Socket,
     }
@@ -103,18 +129,18 @@ pub mod linux {
     }
 
     impl LinuxSocket {
-        /// The long-lived socket on port 5353.
-        pub fn open(family: Family) -> Result<Self> {
-            Self::open_on(family, MDNS_PORT)
+        /// The long-lived socket on the protocol's port.
+        pub fn open(proto: Proto, family: Family) -> Result<Self> {
+            Self::open_on(proto, family, port_of(proto))
         }
 
         /// A short-lived socket on an ephemeral port: the proxy asks from it on a one-shot querier's
         /// behalf, and responders answer it by unicast (they treat it as a legacy querier).
-        pub fn open_ephemeral(family: Family) -> Result<Self> {
-            Self::open_on(family, 0)
+        pub fn open_ephemeral(proto: Proto, family: Family) -> Result<Self> {
+            Self::open_on(proto, family, 0)
         }
 
-        fn open_on(family: Family, port: u16) -> Result<Self> {
+        fn open_on(proto: Proto, family: Family, port: u16) -> Result<Self> {
             let domain = match family {
                 Family::V4 => Domain::IPV4,
                 Family::V6 => Domain::IPV6,
@@ -130,7 +156,8 @@ pub mod linux {
                     setsockopt_int(&sock, libc::IPPROTO_IP, libc::IP_MULTICAST_ALL, 0)?;
                     sock.set_multicast_loop_v4(false)
                         .context("IP_MULTICAST_LOOP")?;
-                    sock.set_multicast_ttl_v4(255).context("IP_MULTICAST_TTL")?;
+                    sock.set_multicast_ttl_v4(ttl_of(proto))
+                        .context("IP_MULTICAST_TTL")?;
                     sock.bind(&SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port).into())
                         .with_context(|| format!("bind 0.0.0.0:{port}"))?;
                 }
@@ -141,17 +168,35 @@ pub mod linux {
                     let _ = setsockopt_int(&sock, libc::IPPROTO_IPV6, libc::IPV6_MULTICAST_ALL, 0);
                     sock.set_multicast_loop_v6(false)
                         .context("IPV6_MULTICAST_LOOP")?;
-                    sock.set_multicast_hops_v6(255)
+                    sock.set_multicast_hops_v6(ttl_of(proto))
                         .context("IPV6_MULTICAST_HOPS")?;
                     sock.bind(&SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port).into())
                         .with_context(|| format!("bind [::]:{port}"))?;
                 }
             }
-            Ok(Self { family, sock })
+            Ok(Self {
+                proto,
+                family,
+                sock,
+            })
         }
     }
 
     impl LinuxSocket {
+        fn group_v4(&self) -> Ipv4Addr {
+            match self.proto {
+                Proto::Mdns => MDNS_V4,
+                Proto::Ssdp => SSDP_V4,
+            }
+        }
+
+        fn group_v6(&self) -> Ipv6Addr {
+            match self.proto {
+                Proto::Mdns => MDNS_V6,
+                Proto::Ssdp => SSDP_V6,
+            }
+        }
+
         /// One send with the egress interface chosen through the pktinfo control message.
         fn send_to(&self, data: &[u8], dst: SocketAddr, ifindex: u32) -> Result<()> {
             let iov = [IoSlice::new(data)];
@@ -199,6 +244,10 @@ pub mod linux {
     }
 
     impl MdnsSocket for LinuxSocket {
+        fn proto(&self) -> Proto {
+            self.proto
+        }
+
         fn family(&self) -> Family {
             self.family
         }
@@ -238,6 +287,7 @@ pub mod linux {
             };
             buf.truncate(n);
             Ok(Received {
+                proto: self.proto,
                 family: self.family,
                 data: buf,
                 src,
@@ -247,7 +297,7 @@ pub mod linux {
         }
 
         fn send_multicast(&self, data: &[u8], ifindex: u32) -> Result<()> {
-            self.send_to(data, group_addr(self.family), ifindex)
+            self.send_to(data, group_addr(self.proto, self.family), ifindex)
         }
 
         fn send_unicast(&self, data: &[u8], dst: SocketAddr, ifindex: u32) -> Result<()> {
@@ -262,11 +312,11 @@ pub mod linux {
             match self.family {
                 Family::V4 => self
                     .sock
-                    .join_multicast_v4_n(&MDNS_V4, &InterfaceIndexOrAddress::Index(ifindex))
+                    .join_multicast_v4_n(&self.group_v4(), &InterfaceIndexOrAddress::Index(ifindex))
                     .with_context(|| format!("IP_ADD_MEMBERSHIP on ifindex {ifindex}")),
                 Family::V6 => self
                     .sock
-                    .join_multicast_v6(&MDNS_V6, ifindex)
+                    .join_multicast_v6(&self.group_v6(), ifindex)
                     .with_context(|| format!("IPV6_JOIN_GROUP on ifindex {ifindex}")),
             }
         }
@@ -275,11 +325,14 @@ pub mod linux {
             match self.family {
                 Family::V4 => self
                     .sock
-                    .leave_multicast_v4_n(&MDNS_V4, &InterfaceIndexOrAddress::Index(ifindex))
+                    .leave_multicast_v4_n(
+                        &self.group_v4(),
+                        &InterfaceIndexOrAddress::Index(ifindex),
+                    )
                     .with_context(|| format!("IP_DROP_MEMBERSHIP on ifindex {ifindex}")),
                 Family::V6 => self
                     .sock
-                    .leave_multicast_v6(&MDNS_V6, ifindex)
+                    .leave_multicast_v6(&self.group_v6(), ifindex)
                     .with_context(|| format!("IPV6_LEAVE_GROUP on ifindex {ifindex}")),
             }
         }

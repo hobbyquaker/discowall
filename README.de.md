@@ -13,7 +13,7 @@ RFC 6762) von einer Netzwerkschnittstelle auf andere weiter, so wie es der Refle
 nach **Regeln**: welche Hosts und welche Dienste aus welchem Netz in welchem anderen Netz sichtbar werden, als
 Whitelist oder Blacklist, nach Quelle, Ziel und Richtung. Eine einfache Form von iptables für `.local`. Dazu eine
 CLI, die zeigt, welche Ankündigungen auf welcher Schnittstelle ankommen und welche Regel sie passieren lassen, und
-die sich in Skripten benutzen lässt. Später soll SSDP (UPnP) dazukommen.
+die sich in Skripten benutzen lässt. SSDP (UPnP) wird nach denselben Regeln weitergeleitet.
 
 ## Warum
 
@@ -97,6 +97,7 @@ avahi-daemon darf auf demselben Host weiterlaufen; discowall leitet nur weiter u
 interfaces = ["lan", "iot"]          # Linux-Namen; eine noch nicht vorhandene Schnittstelle wird abgewartet
 #ipv4 = true
 #ipv6 = true
+#ssdp = true                         # auch SSDP (UPnP, 239.255.255.250:1900) nach denselben Regeln
 #control_socket = "/run/discowall/control.sock"
 #rules_file = "/etc/discowall/rules.toml"
 #dedup_window_ms = 500               # ein identisches Paket in diesem Fenster wird verworfen (zweiter Reflector)
@@ -115,6 +116,7 @@ Aktion; ein weggelassenes Kriterium passt auf alles, eine Liste bedeutet "eines 
 
 | Kriterium | Bedeutung | Beispiel |
 | --- | --- | --- |
+| `proto` | `mdns`, `ssdp`; fehlt: beide | `proto ssdp` |
 | `in` | Schnittstelle, auf der das Paket ankam | `in iot` |
 | `out` | Schnittstelle, auf die es gesendet würde | `out lan` |
 | `src` | ursprüngliche Quelladresse oder Präfix | `src 192.168.30.0/24,fd00::/8` |
@@ -124,6 +126,10 @@ Aktion; ein weggelassenes Kriterium passt auf alles, eine Liste bedeutet "eines 
 | `host` | Hostnamen | `host bridge,printer?` |
 | `rrtype` | Record-Typen, bei Anfragen der der Frage | `rrtype AAAA` |
 | Aktion | `accept` oder `drop`, `log` schreibt pro Treffer eine Journal-Zeile | `accept log` |
+
+Bei SSDP ist `service` das NT/ST (`upnp:rootdevice`, `urn:schemas-upnp-org:device:MediaRenderer:1`, `ssdp:all`),
+`instance` die `uuid:…` des Geräts und `host` der Host seiner LOCATION-URL; `kind` ist `query` für M-SEARCH,
+`announce` für alive/byebye/update und `response` für eine Suchantwort.
 
 Eine Regel auf einen Host oder Dienst gilt für das ganze Bündel, das ein Dienst ist: seine PTR-, SRV-, TXT- und
 A/AAAA-Records, die in getrennten Paketen kommen. Der Daemon führt eine Tabelle dessen, was jede Schnittstelle
@@ -187,6 +193,10 @@ discoctl rule add in guest drop
 discoctl rule add in lan out iot kind query service _googlecast._tcp accept
 discoctl rule add in iot out lan kind response,announce service _googlecast._tcp accept
 
+# UPnP: das LAN darf im IoT-Netz suchen, der Media-Renderer meldet sich zurück
+discoctl rule add proto ssdp in lan out iot kind query accept
+discoctl rule add proto ssdp in iot out lan kind announce,response service urn:schemas-upnp-org:device:MediaRenderer:1,upnp:rootdevice accept
+
 # Sonos: ein Host, nach Namen
 discoctl rule add in lan out media kind query service _sonos._tcp accept
 discoctl rule add in media out lan kind response,announce host "sonos*" accept
@@ -231,6 +241,11 @@ Das Ergebnis je Zielschnittstelle ist `sent`, `partial` (einige Records verworfe
   etwas verworfen wurde, das QU-Bit gelöscht, Link-local-Adressrecords entfernt, die TTL ist 255.
 - Schleifen: nie zurück auf die Eingangsschnittstelle, Pakete von den eigenen Adressen des Routers werden
   verworfen, ein identisches Paket im Dedup-Fenster ebenso.
+- SSDP (UPnP, 239.255.255.250:1900 / ff02::c) nutzt ein zweites Socket-Paar. NOTIFY-Nachrichten werden nach den
+  Regeln weitergeleitet; ein M-SEARCH läuft immer über den Proxy, weil UPnP-Antworten per Unicast an den Port des
+  Suchenden gehen: Der Daemon sucht auf den erlaubten Schnittstellen von einem Ephemeral-Socket, sammelt die
+  Antworten MX Sekunden lang und gibt sie von Port 1900 an den Suchenden zurück. Eine LOCATION auf einer
+  Link-local-Adresse wird verworfen.
 - Eine Anfrage von einem Ephemeral-Port (`dig @224.0.0.251 -p 5353`, Einmal-Bibliotheken) lässt sich nicht
   spiegeln: Der Daemon fragt auf den erlaubten Schnittstellen von einem eigenen Ephemeral-Socket, sammelt die
   Unicast-Antworten ein kurzes Fenster lang, schickt sie durch die Regeln und gibt sie per Unicast von Port 5353
@@ -258,7 +273,7 @@ Rust, Aufwandsschätzung, Protokoll der Entscheidungen) steht in
   Deduplizierung, Fuzzing, Härtung der Unit
 - 🕵️ **P4:** Pakete (Tarball, deb, rpm, OpenWrt), Cross-Builds, Release-Workflow, README und Manpages
 - 💤 nftables-Sets mit den Adressen erlaubter Hosts
-- 💤 SSDP (UPnP) als zweites Protokoll
+- 🕵️ SSDP (UPnP) als zweites Protokoll
 - 💤 FreeBSD-Backend und pfSense-Paket
 - ✅ Konzept: Regelmodell, CLI, Laufzeit mit dem Maintainer besprochen
 

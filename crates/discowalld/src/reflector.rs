@@ -7,7 +7,8 @@ use crate::ifaces::IfaceEvent;
 use crate::packet::{Kind, Packet, Section};
 use crate::proxy;
 use crate::rules::{self, Chain, Subject, Verdict};
-use crate::socket::{Family, MdnsSocket, Received, ReplyTo, SocketFactory};
+use crate::socket::{Family, MdnsSocket, Proto, Received, ReplyTo, SocketFactory};
+use crate::ssdp::{SsdpKind, SsdpMessage};
 use anyhow::{Context, Result};
 use discowall_proto::{
     Action, Counters, InterfaceStats, InterfaceStatus, PacketKind, Request, Response, RuleSet,
@@ -149,8 +150,10 @@ impl Reflector {
         })
     }
 
-    fn socket(&self, family: Family) -> Option<&Arc<dyn MdnsSocket>> {
-        self.sockets.iter().find(|s| s.family() == family)
+    fn socket(&self, proto: Proto, family: Family) -> Option<&Arc<dyn MdnsSocket>> {
+        self.sockets
+            .iter()
+            .find(|s| s.proto() == proto && s.family() == family)
     }
 
     /// Every few seconds: expire the host table.
@@ -455,6 +458,7 @@ impl Reflector {
             .unwrap_or(0);
         let ev = WatchEvent {
             ts_ms,
+            proto: pkt.proto,
             iface: in_iface.to_string(),
             src: pkt.src.to_string(),
             len: pkt.data.len(),
@@ -493,6 +497,9 @@ impl Reflector {
             self.emit(&in_name, &pkt, "duplicate".into(), None, vec![]);
             return vec![];
         }
+        if pkt.proto == Proto::Ssdp {
+            return self.on_ssdp(pkt, &in_name);
+        }
         let parsed = match Packet::parse(&pkt.data) {
             Ok(p) => p,
             Err(e) => {
@@ -503,7 +510,7 @@ impl Reflector {
             }
         };
         self.hosts.learn(&in_name, &parsed, Instant::now());
-        let Some(socket) = self.socket(pkt.family).cloned() else {
+        let Some(socket) = self.socket(pkt.proto, pkt.family).cloned() else {
             return vec![];
         };
         if let Some(reply_to) = pkt.reply_to {
@@ -729,6 +736,7 @@ impl Reflector {
             };
             match proxy::ask(
                 &self.factory,
+                pkt.proto,
                 pkt.family,
                 queries,
                 reply_to,
@@ -751,6 +759,285 @@ impl Reflector {
             decisions,
         );
         asked
+    }
+
+    /// SSDP: one message is one subject. Notifications are forwarded by multicast under the rules,
+    /// searches are proxied (UPnP answers are always unicast, to the searcher's port), answers the
+    /// proxy collected are relayed to the searcher.
+    fn on_ssdp(&mut self, pkt: Received, in_name: &str) -> Vec<String> {
+        let msg = match SsdpMessage::parse(&pkt.data) {
+            Ok(m) => m,
+            Err(e) => {
+                self.counters.dropped_unparsable += 1;
+                debug!(iface = %in_name, src = %pkt.src, len = pkt.data.len(), "ssdp unparsable, dropped: {e}");
+                self.emit_ssdp(in_name, &pkt, "unparsable".into(), None, vec![]);
+                return vec![];
+            }
+        };
+        self.hosts.learn_ssdp(in_name, &msg, Instant::now());
+        let Some(socket) = self.socket(Proto::Ssdp, pkt.family).cloned() else {
+            return vec![];
+        };
+        let kind_name = format!("ssdp-{}", msg.kind);
+        // A LOCATION on a link-local address is useless on another segment.
+        if self.strip_link_local && msg.location_ip().is_some_and(is_link_local) {
+            self.counters.dropped_link_local += 1;
+            self.emit_ssdp(in_name, &pkt, kind_name, Some(&msg), vec![]);
+            return vec![];
+        }
+        if let Some(reply_to) = pkt.reply_to {
+            // An answer to a proxied search.
+            let Some(out_name) = self.index_to_name.get(&reply_to.ifindex).cloned() else {
+                self.counters.dropped_unknown_interface += 1;
+                return vec![];
+            };
+            let v = self.ssdp_decide(&msg, in_name, &out_name, pkt.src.ip());
+            let decision = if v.action == Action::Accept {
+                match socket.send_unicast(&pkt.data, reply_to.addr, reply_to.ifindex) {
+                    Ok(()) => {
+                        self.counters.tx += 1;
+                        self.counters.proxied_answers += 1;
+                        self.ifaces.get_mut(&out_name).expect("configured").tx += 1;
+                        WatchDecision {
+                            iface: out_name.clone(),
+                            result: "relayed".into(),
+                            dropped: 0,
+                            rules: v.rule.into_iter().collect(),
+                        }
+                    }
+                    Err(e) => {
+                        self.counters.send_errors += 1;
+                        warn!(iface = %out_name, "ssdp unicast relay failed: {e:#}");
+                        WatchDecision {
+                            iface: out_name.clone(),
+                            result: "error".into(),
+                            dropped: 0,
+                            rules: v.rule.into_iter().collect(),
+                        }
+                    }
+                }
+            } else {
+                WatchDecision {
+                    iface: out_name.clone(),
+                    result: "dropped".into(),
+                    dropped: 1,
+                    rules: v.rule.into_iter().collect(),
+                }
+            };
+            let sent = if decision.result == "relayed" {
+                vec![out_name]
+            } else {
+                vec![]
+            };
+            self.emit_ssdp(in_name, &pkt, kind_name, Some(&msg), vec![decision]);
+            return sent;
+        }
+        if msg.kind == SsdpKind::Response {
+            // A unicast answer that reached our 1900 socket is not ours to forward.
+            self.emit_ssdp(in_name, &pkt, kind_name, Some(&msg), vec![]);
+            return vec![];
+        }
+        let targets: Vec<(String, Option<u32>)> = self
+            .names
+            .iter()
+            .filter(|n| **n != in_name)
+            .map(|n| {
+                let i = &self.ifaces[n];
+                (
+                    n.clone(),
+                    (i.up && i.joined.contains(&pkt.family))
+                        .then(|| i.index.expect("up implies index")),
+                )
+            })
+            .collect();
+        let mut decisions = Vec::with_capacity(targets.len());
+        let mut sent = Vec::new();
+        let mut queries = Vec::new();
+        for (name, index) in targets {
+            let Some(index) = index else {
+                decisions.push(WatchDecision {
+                    iface: name,
+                    result: "down".into(),
+                    dropped: 0,
+                    rules: vec![],
+                });
+                continue;
+            };
+            let v = self.ssdp_decide(&msg, in_name, &name, pkt.src.ip());
+            let rules: Vec<usize> = v.rule.into_iter().collect();
+            if v.log {
+                info!(
+                    "rule {} {} {}: {} -> {} from {} (ssdp {})",
+                    v.rule
+                        .map(|r| r.to_string())
+                        .unwrap_or_else(|| "default".into()),
+                    v.action,
+                    msg.summary(),
+                    in_name,
+                    name,
+                    pkt.src,
+                    msg.kind
+                );
+            }
+            if v.action != Action::Accept {
+                self.counters.records_dropped += 1;
+                decisions.push(WatchDecision {
+                    iface: name,
+                    result: "dropped".into(),
+                    dropped: 1,
+                    rules,
+                });
+                continue;
+            }
+            if msg.is_search() {
+                queries.push((pkt.data.clone(), index));
+                decisions.push(WatchDecision {
+                    iface: name.clone(),
+                    result: "asked".into(),
+                    dropped: 0,
+                    rules,
+                });
+                sent.push(name);
+                continue;
+            }
+            match socket.send_multicast(&pkt.data, index) {
+                Ok(()) => {
+                    self.counters.tx += 1;
+                    self.ifaces.get_mut(&name).expect("configured").tx += 1;
+                    decisions.push(WatchDecision {
+                        iface: name.clone(),
+                        result: "sent".into(),
+                        dropped: 0,
+                        rules,
+                    });
+                    sent.push(name);
+                }
+                Err(e) => {
+                    self.counters.send_errors += 1;
+                    warn!(iface = %name, "ssdp send failed: {e:#}");
+                    decisions.push(WatchDecision {
+                        iface: name,
+                        result: "error".into(),
+                        dropped: 0,
+                        rules,
+                    });
+                }
+            }
+        }
+        if !queries.is_empty() {
+            // Responders wait up to MX seconds (UPnP caps it at 5); collect a little longer.
+            let mx = msg.mx.unwrap_or(1).min(5) as u64;
+            let window = Duration::from_millis(mx * 1000 + 500);
+            let reply_to = ReplyTo {
+                addr: pkt.src,
+                ifindex: pkt.ifindex,
+            };
+            match proxy::ask(
+                &self.factory,
+                Proto::Ssdp,
+                pkt.family,
+                queries,
+                reply_to,
+                window,
+                self.packet_tx.clone(),
+            ) {
+                Ok(()) => self.counters.proxied_queries += 1,
+                Err(e) => {
+                    self.counters.send_errors += 1;
+                    warn!("ssdp search proxy failed: {e:#}");
+                }
+            }
+        }
+        if sent.is_empty() && decisions.iter().any(|d| d.result == "dropped") {
+            self.counters.dropped_by_rules += 1;
+        }
+        debug!(iface = %in_name, src = %pkt.src, to = ?sent, "{}", msg.summary());
+        self.emit_ssdp(in_name, &pkt, kind_name, Some(&msg), decisions);
+        sent
+    }
+
+    fn ssdp_decide(
+        &mut self,
+        msg: &SsdpMessage,
+        in_iface: &str,
+        out_iface: &str,
+        src: IpAddr,
+    ) -> Verdict {
+        let kind = match msg.kind {
+            SsdpKind::Search => PacketKind::Query,
+            SsdpKind::Response => PacketKind::Response,
+            SsdpKind::Alive | SsdpKind::Byebye | SsdpKind::Update => PacketKind::Announce,
+        };
+        let mut s = Subject {
+            proto: Proto::Ssdp,
+            in_iface,
+            out_iface,
+            src: Some(src),
+            kind,
+            rrtype: None,
+            ..Default::default()
+        };
+        if let Some(t) = &msg.target {
+            s.services.push(t.clone());
+        }
+        if let Some(u) = &msg.uuid {
+            s.instances.push(u.clone());
+        }
+        if let Some(h) = &msg.location_host {
+            s.hosts.push(h.clone());
+        }
+        // What the table knows about the uuid or the host fills in what the message left out
+        // (a byebye carries no LOCATION, a search names only a type).
+        for name in [msg.uuid.clone(), msg.location_host.clone()]
+            .into_iter()
+            .flatten()
+        {
+            let b = self.hosts.bundle_of(in_iface, &name);
+            for x in b.services {
+                if !s.services.contains(&x) {
+                    s.services.push(x);
+                }
+            }
+            for x in b.hosts {
+                if !s.hosts.contains(&x) {
+                    s.hosts.push(x);
+                }
+            }
+        }
+        self.chain.decide(&s)
+    }
+
+    fn emit_ssdp(
+        &self,
+        in_iface: &str,
+        pkt: &Received,
+        kind: String,
+        msg: Option<&SsdpMessage>,
+        out: Vec<WatchDecision>,
+    ) {
+        if self.events.receiver_count() == 0 {
+            return;
+        }
+        let ts_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        let ev = WatchEvent {
+            ts_ms,
+            proto: Proto::Ssdp,
+            iface: in_iface.to_string(),
+            src: pkt.src.to_string(),
+            len: pkt.data.len(),
+            kind,
+            services: msg.and_then(|m| m.target.clone()).into_iter().collect(),
+            instances: msg.and_then(|m| m.uuid.clone()).into_iter().collect(),
+            hosts: msg
+                .and_then(|m| m.location_host.clone())
+                .into_iter()
+                .collect(),
+            out,
+        };
+        let _ = self.events.send(ev);
     }
 
     pub fn handle(&mut self, request: Request) -> Response {
@@ -860,6 +1147,7 @@ impl Reflector {
             .as_ref()
             .and_then(|s| s.to_uppercase().parse().ok());
         let mut s = Subject {
+            proto: t.proto,
             in_iface: &t.in_iface,
             out_iface: &t.out,
             src: t.src,
@@ -943,6 +1231,7 @@ mod tests {
 
     /// Records sends; never receives.
     struct FakeSocket {
+        proto: Proto,
         family: Family,
         sent: Mutex<Vec<(Vec<u8>, u32)>>,
         unicast: Mutex<Vec<(Vec<u8>, SocketAddr, u32)>>,
@@ -951,7 +1240,11 @@ mod tests {
 
     impl FakeSocket {
         fn new(family: Family) -> Arc<Self> {
+            Self::with_proto(Proto::Mdns, family)
+        }
+        fn with_proto(proto: Proto, family: Family) -> Arc<Self> {
             Arc::new(Self {
+                proto,
                 family,
                 sent: Mutex::new(vec![]),
                 unicast: Mutex::new(vec![]),
@@ -964,6 +1257,9 @@ mod tests {
     }
 
     impl MdnsSocket for FakeSocket {
+        fn proto(&self) -> Proto {
+            self.proto
+        }
         fn family(&self) -> Family {
             self.family
         }
@@ -997,12 +1293,16 @@ mod tests {
     /// The proxy's ephemeral socket: records the query it sent and answers once with what the
     /// test put in, from the interface the query went to.
     struct FakeEphemeral {
+        proto: Proto,
         sent: Mutex<Vec<(Vec<u8>, u32)>>,
         answer: Vec<u8>,
         answered: std::sync::atomic::AtomicBool,
     }
 
     impl MdnsSocket for FakeEphemeral {
+        fn proto(&self) -> Proto {
+            self.proto
+        }
         fn family(&self) -> Family {
             Family::V4
         }
@@ -1015,6 +1315,7 @@ mod tests {
             }
             let (_, ifindex) = self.sent.lock().unwrap()[0].clone();
             Ok(Received {
+                proto: self.proto,
                 family: Family::V4,
                 data: self.answer.clone(),
                 src: SocketAddr::new("10.1.0.5".parse().unwrap(), 5353),
@@ -1078,7 +1379,7 @@ mod tests {
     }
 
     fn no_factory() -> SocketFactory {
-        Arc::new(|_, _| anyhow::bail!("no ephemeral sockets in this test"))
+        Arc::new(|_, _, _| anyhow::bail!("no ephemeral sockets in this test"))
     }
 
     fn setup(rules: &str) -> (Reflector, Arc<FakeSocket>, TempDir) {
@@ -1157,6 +1458,7 @@ mod tests {
 
     fn packet(ifindex: u32, src: &str, data: &[u8]) -> Received {
         Received {
+            proto: Proto::Mdns,
             family: Family::V4,
             data: data.to_vec(),
             src: SocketAddr::new(src.parse().unwrap(), 5353),
@@ -1471,13 +1773,14 @@ action = "accept"
     fn legacy_query_is_proxied_and_the_answer_relayed_by_unicast() {
         let answer = announce("Living Room", "_hap._tcp", "bridge", "10.1.0.5");
         let eph = Arc::new(FakeEphemeral {
+            proto: Proto::Mdns,
             sent: Mutex::new(vec![]),
             answer,
             answered: Default::default(),
         });
         let eph2 = eph.clone();
-        let factory: SocketFactory = Arc::new(move |family, ephemeral| {
-            assert!(ephemeral && family == Family::V4);
+        let factory: SocketFactory = Arc::new(move |proto, family, ephemeral| {
+            assert!(ephemeral && family == Family::V4 && proto == Proto::Mdns);
             Ok(eph2.clone() as Arc<dyn MdnsSocket>)
         });
         let ((mut r, sock, _d), mut rx) = setup_with(HOMEKIT, factory);
@@ -1536,6 +1839,156 @@ action = "accept"
         let mut q = packet(1, "10.0.0.7", &browse("_hap._tcp"));
         q.src.set_port(40000);
         assert!(r2.on_packet(q).is_empty());
+    }
+
+    const SSDP_RULES: &str = r#"
+default = "drop"
+[[rule]]
+proto = ["ssdp"]
+in = "lan"
+out = "iot"
+kind = ["query"]
+action = "accept"
+[[rule]]
+proto = ["ssdp"]
+in = "iot"
+out = "lan"
+kind = ["announce", "response"]
+service = ["urn:schemas-upnp-org:device:mediarenderer:1"]
+action = "accept"
+"#;
+
+    fn ssdp_packet(ifindex: u32, src: &str, port: u16, text: &str) -> Received {
+        Received {
+            proto: Proto::Ssdp,
+            family: Family::V4,
+            data: text.as_bytes().to_vec(),
+            src: SocketAddr::new(src.parse().unwrap(), port),
+            ifindex,
+            reply_to: None,
+        }
+    }
+
+    const ALIVE_RENDERER: &str = "NOTIFY * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nCACHE-CONTROL: max-age=1800\r\nLOCATION: http://10.1.0.40:1400/xml\r\nNT: urn:schemas-upnp-org:device:MediaRenderer:1\r\nNTS: ssdp:alive\r\nUSN: uuid:rincon_1::urn:schemas-upnp-org:device:MediaRenderer:1\r\n\r\n";
+    const ALIVE_CAMERA: &str = "NOTIFY * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nCACHE-CONTROL: max-age=1800\r\nLOCATION: http://10.1.0.41:80/d.xml\r\nNT: urn:schemas-upnp-org:device:Basic:1\r\nNTS: ssdp:alive\r\nUSN: uuid:cam_1::urn:schemas-upnp-org:device:Basic:1\r\n\r\n";
+    const BYEBYE_RENDERER: &str = "NOTIFY * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nNT: upnp:rootdevice\r\nNTS: ssdp:byebye\r\nUSN: uuid:rincon_1::upnp:rootdevice\r\n\r\n";
+    const SEARCH_ALL: &str = "M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"ssdp:discover\"\r\nMX: 1\r\nST: ssdp:all\r\n\r\n";
+    const SEARCH_ANSWER: &str = "HTTP/1.1 200 OK\r\nCACHE-CONTROL: max-age=1800\r\nEXT:\r\nLOCATION: http://10.1.0.40:1400/xml\r\nST: urn:schemas-upnp-org:device:MediaRenderer:1\r\nUSN: uuid:rincon_1::urn:schemas-upnp-org:device:MediaRenderer:1\r\n\r\n";
+
+    #[test]
+    fn ssdp_notifications_follow_the_rules_and_the_table() {
+        let ssdp = FakeSocket::with_proto(Proto::Ssdp, Family::V4);
+        let mdns = FakeSocket::new(Family::V4);
+        let (cfg, _d) = config(&["lan", "iot", "guest"], SSDP_RULES);
+        let (tx, _rx) = mpsc::channel(16);
+        let mut r = Reflector::new(
+            &cfg,
+            "test".into(),
+            vec![mdns.clone(), ssdp.clone()],
+            no_factory(),
+            tx,
+        )
+        .unwrap();
+        for (i, n) in ["lan", "iot", "guest"].iter().enumerate() {
+            r.on_iface_event(IfaceEvent::Link {
+                index: i as u32 + 10,
+                name: n.to_string(),
+                up: true,
+            });
+            r.on_iface_event(IfaceEvent::AddrAdded {
+                index: i as u32 + 10,
+                addr: format!("10.{i}.0.1").parse().unwrap(),
+            });
+        }
+        let mut events = r.events.subscribe();
+        // The renderer's alive crosses to lan, the camera's does not.
+        assert_eq!(
+            r.on_packet(ssdp_packet(11, "10.1.0.40", 1900, ALIVE_RENDERER)),
+            vec!["lan"]
+        );
+        assert!(r
+            .on_packet(ssdp_packet(11, "10.1.0.41", 1900, ALIVE_CAMERA))
+            .is_empty());
+        assert_eq!(ssdp.take(), vec![(ALIVE_RENDERER.as_bytes().to_vec(), 10)]);
+        assert!(mdns.take().is_empty());
+        // The byebye names only upnp:rootdevice; the table knows the uuid is the renderer.
+        assert_eq!(
+            r.on_packet(ssdp_packet(11, "10.1.0.40", 1900, BYEBYE_RENDERER)),
+            vec!["lan"]
+        );
+        // An mDNS packet is not touched by ssdp-only rules: the chain's default drops it.
+        assert!(r
+            .on_packet(packet(10, "10.0.0.7", &browse("_hap._tcp")))
+            .is_empty());
+        let ev = events.try_recv().unwrap();
+        assert_eq!((ev.proto, ev.kind.as_str()), (Proto::Ssdp, "ssdp-alive"));
+        assert_eq!(ev.instances, vec!["uuid:rincon_1"]);
+        assert_eq!(ev.hosts, vec!["10.1.0.40"]);
+        assert_eq!(ev.out[0].result, "sent");
+        // The byebye expired the renderer; the next sweep removes it.
+        r.hosts.expire(Instant::now() + Duration::from_secs(1));
+        let services = r.hosts.services(Instant::now());
+        assert_eq!(
+            services.iter().filter(|s| s.iface == "iot").count(),
+            1,
+            "the renderer said goodbye: {services:?}"
+        );
+    }
+
+    #[test]
+    fn ssdp_search_is_proxied_and_the_answer_relayed() {
+        let eph = Arc::new(FakeEphemeral {
+            proto: Proto::Ssdp,
+            sent: Mutex::new(vec![]),
+            answer: SEARCH_ANSWER.as_bytes().to_vec(),
+            answered: Default::default(),
+        });
+        let eph2 = eph.clone();
+        let factory: SocketFactory = Arc::new(move |proto, _family, ephemeral| {
+            assert!(ephemeral && proto == Proto::Ssdp);
+            Ok(eph2.clone() as Arc<dyn MdnsSocket>)
+        });
+        let ssdp = FakeSocket::with_proto(Proto::Ssdp, Family::V4);
+        let (cfg, _d) = config(&["lan", "iot", "guest"], SSDP_RULES);
+        let (tx, mut rx) = mpsc::channel(16);
+        let mut r = Reflector::new(&cfg, "test".into(), vec![ssdp.clone()], factory, tx).unwrap();
+        for (i, n) in ["lan", "iot", "guest"].iter().enumerate() {
+            r.on_iface_event(IfaceEvent::Link {
+                index: i as u32 + 10,
+                name: n.to_string(),
+                up: true,
+            });
+        }
+        // A search from lan (always from an ephemeral port in SSDP): asked on iot, not on guest.
+        assert_eq!(
+            r.on_packet(ssdp_packet(10, "10.0.0.7", 50000, SEARCH_ALL)),
+            vec!["iot"]
+        );
+        assert_eq!(r.counters.proxied_queries, 1);
+        assert_eq!(eph.sent.lock().unwrap()[0].1, 11);
+        assert!(
+            ssdp.take().is_empty(),
+            "a search is never multicast by the main socket"
+        );
+        let answer = rx.blocking_recv().expect("the renderer's answer");
+        assert_eq!(
+            answer.reply_to.map(|r| r.addr),
+            Some("10.0.0.7:50000".parse().unwrap())
+        );
+        assert_eq!(r.on_packet(answer), vec!["lan"]);
+        let uni = ssdp.unicast.lock().unwrap();
+        assert_eq!(uni[0].1, "10.0.0.7:50000".parse::<SocketAddr>().unwrap());
+        assert_eq!(r.counters.proxied_answers, 1);
+        // A stray 200 OK on the multicast socket is not forwarded.
+        assert!(r
+            .on_packet(ssdp_packet(11, "10.1.0.40", 1900, SEARCH_ANSWER))
+            .is_empty());
+        // A LOCATION on a link-local address is dropped before the rules.
+        let ll = ALIVE_RENDERER.replace("http://10.1.0.40:1400", "http://169.254.7.7:1400");
+        assert!(r
+            .on_packet(ssdp_packet(11, "10.1.0.40", 1900, &ll))
+            .is_empty());
+        assert_eq!(r.counters.dropped_link_local, 1);
     }
 
     #[test]

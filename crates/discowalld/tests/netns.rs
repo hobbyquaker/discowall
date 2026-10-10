@@ -393,13 +393,91 @@ fn inner() {
     let stats_json: serde_json::Value = serde_json::from_str(&ctl(&["--json", "stats"])).unwrap();
     assert_eq!(stats_json["rules"][0]["hits"], 4, "{stats_json}");
 
+    // SSDP: a renderer announces in B and is seen in A; a search from A is proxied into B and the
+    // responder's unicast answer comes back to A from the router's port 1900.
+    ctl(&[
+        "rule",
+        "add",
+        "proto",
+        "ssdp",
+        "in",
+        "b0",
+        "out",
+        "a0",
+        "kind",
+        "announce,response",
+        "accept",
+    ]);
+    ctl(&[
+        "rule", "add", "proto", "ssdp", "in", "a0", "out", "b0", "kind", "query", "accept",
+    ]);
+    let recv_a = a
+        .run(&["python3"])
+        .arg(probe())
+        .args(["ssdp-recv", "10.1.0.2", "3"])
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(300));
+    b.sh(&format!(
+        "python3 {} ssdp-notify 10.2.0.2 uuid:renderer-1 urn:schemas-upnp-org:device:MediaRenderer:1 http://10.2.0.8:1400/xml",
+        probe().display()
+    ));
+    let got = String::from_utf8_lossy(&recv_a.wait_with_output().unwrap().stdout)
+        .trim()
+        .to_string();
+    assert_eq!(
+        got,
+        "10.1.0.1:1900 NOTIFY * HTTP/1.1 NTS=ssdp:alive NT=urn:schemas-upnp-org:device:MediaRenderer:1 USN=uuid:renderer-1::urn:schemas-upnp-org:device:MediaRenderer:1 LOCATION=http://10.2.0.8:1400/xml",
+        "the alive must reach leaf A"
+    );
+    let responder = b
+        .run(&["python3"])
+        .arg(probe())
+        .args([
+            "ssdp-respond",
+            "10.2.0.2",
+            "4",
+            "uuid:renderer-1",
+            "upnp:rootdevice",
+            "http://10.2.0.8:1400/xml",
+        ])
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(300));
+    let search = a
+        .run(&["python3"])
+        .arg(probe())
+        .args(["ssdp-search", "10.1.0.2", "ssdp:all", "3"])
+        .output()
+        .unwrap();
+    let got = String::from_utf8_lossy(&search.stdout).trim().to_string();
+    assert_eq!(
+        got,
+        "10.1.0.1:1900 HTTP/1.1 200 OK ST=upnp:rootdevice USN=uuid:renderer-1::upnp:rootdevice LOCATION=http://10.2.0.8:1400/xml",
+        "the search answer must come back by unicast from the router"
+    );
+    let answered = String::from_utf8_lossy(&responder.wait_with_output().unwrap().stdout)
+        .trim()
+        .to_string();
+    assert!(answered.starts_with("answered 10.2.0.1:"), "{answered:?}");
+    let services = ctl(&["services"]);
+    assert!(
+        services.contains("uuid:renderer-1") && services.contains("mediarenderer"),
+        "{services}"
+    );
+
     watcher.kill().unwrap();
     let watched = watcher.wait_with_output().unwrap();
     let lines: Vec<serde_json::Value> = String::from_utf8_lossy(&watched.stdout)
         .lines()
         .map(|l| serde_json::from_str(l).unwrap())
         .collect();
-    assert_eq!(lines.len(), 2, "two announcements on b0: {lines:?}");
+    assert!(
+        lines.len() >= 2,
+        "two mDNS announcements on b0 at least: {lines:?}"
+    );
     assert_eq!(lines[0]["kind"], "announce");
     assert_eq!(lines[0]["hosts"][0], "camera.local");
     assert_eq!(lines[0]["out"][0]["result"], "dropped");

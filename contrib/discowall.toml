@@ -7,6 +7,9 @@ interfaces = ["lan", "iot"]
 #ipv4 = true
 #ipv6 = true
 
+# Also forward SSDP (UPnP, 239.255.255.250:1900 / ff02::c) under the same rules (`proto ssdp`).
+#ssdp = true
+
 # Where discoctl talks to the daemon.
 #control_socket = "/run/discowall/control.sock"
 

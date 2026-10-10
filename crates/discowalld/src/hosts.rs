@@ -119,6 +119,46 @@ impl HostTable {
         }
     }
 
+    /// An SSDP notification or response: the uuid is the instance, the NT/ST its service, the
+    /// LOCATION's host its host. A byebye expires it at once.
+    pub fn learn_ssdp(&mut self, iface: &str, msg: &crate::ssdp::SsdpMessage, now: Instant) {
+        use crate::ssdp::SsdpKind;
+        let (Some(uuid), Some(target)) = (&msg.uuid, &msg.target) else {
+            return;
+        };
+        if msg.kind == SsdpKind::Search {
+            return;
+        }
+        let seg = self.segments.entry(iface.to_string()).or_default();
+        let ttl = if msg.kind == SsdpKind::Byebye {
+            0
+        } else {
+            msg.max_age.unwrap_or(1800)
+        };
+        let e = seg.instances.entry(uuid.clone()).or_insert(Instance {
+            service: target.clone(),
+            host: None,
+            port: None,
+            expires: expiry(now, ttl),
+        });
+        // A device announces several types for one uuid; the root device and the specific type
+        // both name it. Keep the most specific (a urn) over upnp:rootdevice / the bare uuid.
+        if target.starts_with("urn:") || !e.service.starts_with("urn:") {
+            e.service = target.clone();
+        }
+        e.expires = expiry(now, ttl);
+        if let Some(host) = &msg.location_host {
+            e.host = Some(host.clone());
+            e.port = msg.location_port;
+            let h = seg.hosts.entry(host.clone()).or_default();
+            h.instances.insert(uuid.clone());
+            h.last_seen = Some(now);
+            if let Some(ip) = msg.location_ip() {
+                h.addrs.insert(ip, expiry(now, ttl));
+            }
+        }
+    }
+
     /// Drops what has expired. Cheap enough to run every few seconds.
     pub fn expire(&mut self, now: Instant) {
         for seg in self.segments.values_mut() {
@@ -140,9 +180,10 @@ impl HostTable {
         if let Some(st) = packet::service_type_of(name) {
             push(&mut b.services, &st);
         }
-        if packet::is_instance(name) {
+        if packet::is_instance(name) || name.starts_with("uuid:") {
             push(&mut b.instances, name);
             if let Some(i) = seg.and_then(|s| s.instances.get(name)) {
+                push(&mut b.services, &i.service);
                 if let Some(h) = &i.host {
                     push(&mut b.hosts, h);
                 }
@@ -341,6 +382,31 @@ mod tests {
         t.learn("iot", &announcement(0), now + Duration::from_secs(1));
         t.expire(now + Duration::from_secs(2));
         assert!(t.view(now).is_empty());
+    }
+
+    #[test]
+    fn ssdp_notifications_join_the_table() {
+        let mut t = HostTable::default();
+        let now = Instant::now();
+        let alive = crate::ssdp::SsdpMessage::parse(b"NOTIFY * HTTP/1.1\r\nNTS: ssdp:alive\r\nNT: upnp:rootdevice\r\nUSN: uuid:abc::upnp:rootdevice\r\nLOCATION: http://10.0.0.40:1400/xml\r\nCACHE-CONTROL: max-age=60\r\n\r\n").unwrap();
+        t.learn_ssdp("iot", &alive, now);
+        let specific = crate::ssdp::SsdpMessage::parse(b"NOTIFY * HTTP/1.1\r\nNTS: ssdp:alive\r\nNT: urn:schemas-upnp-org:device:MediaRenderer:1\r\nUSN: uuid:abc::urn:schemas-upnp-org:device:MediaRenderer:1\r\nLOCATION: http://10.0.0.40:1400/xml\r\nCACHE-CONTROL: max-age=60\r\n\r\n").unwrap();
+        t.learn_ssdp("iot", &specific, now);
+        let b = t.bundle_of("iot", "uuid:abc");
+        assert_eq!(
+            b.services,
+            vec!["urn:schemas-upnp-org:device:mediarenderer:1"]
+        );
+        assert_eq!(b.hosts, vec!["10.0.0.40"]);
+        let b = t.bundle_of("iot", "10.0.0.40");
+        assert_eq!(b.instances, vec!["uuid:abc"]);
+        let v = t.view(now);
+        assert_eq!(v[0].addresses, vec!["10.0.0.40".parse::<IpAddr>().unwrap()]);
+        assert_eq!(v[0].instances[0].port, Some(1400));
+        let bye = crate::ssdp::SsdpMessage::parse(b"NOTIFY * HTTP/1.1\r\nNTS: ssdp:byebye\r\nNT: upnp:rootdevice\r\nUSN: uuid:abc::upnp:rootdevice\r\n\r\n").unwrap();
+        t.learn_ssdp("iot", &bye, now + Duration::from_secs(1));
+        t.expire(now + Duration::from_secs(2));
+        assert!(t.services(now).is_empty());
     }
 
     #[test]

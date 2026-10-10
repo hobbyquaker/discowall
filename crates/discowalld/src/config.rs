@@ -14,6 +14,9 @@ pub struct Config {
     pub ipv4: bool,
     #[serde(default = "yes")]
     pub ipv6: bool,
+    /// Also forward SSDP (UPnP, 239.255.255.250:1900 / ff02::c) under the same rules (`proto ssdp`).
+    #[serde(default = "yes")]
+    pub ssdp: bool,
     #[serde(default = "default_socket")]
     pub control_socket: PathBuf,
     /// The rules file (`discoctl save` writes it, `discoctl apply` reloads it). Missing: an empty

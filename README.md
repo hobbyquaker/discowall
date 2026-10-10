@@ -12,8 +12,8 @@ discowall is a **discovery firewall** for a Linux router: it forwards mDNS packe
 from one network interface to others, as avahi-daemon's reflector does, but under **rules**: which hosts and
 which services from which network become visible in which other network, as a whitelist or a blacklist, by
 source, target and direction. A simple form of iptables for `.local`. Plus a CLI that shows which announcements
-arrive on which interface and which rule lets them pass, and that is usable from scripts. SSDP (UPnP) is to
-follow later.
+arrive on which interface and which rule lets them pass, and that is usable from scripts. SSDP (UPnP) is
+forwarded under the same rules.
 
 ## Why
 
@@ -96,6 +96,7 @@ keep running on the same host; discowall only forwards and never answers for the
 interfaces = ["lan", "iot"]          # by their Linux names; one that does not exist yet is waited for
 #ipv4 = true
 #ipv6 = true
+#ssdp = true                         # also forward SSDP (UPnP, 239.255.255.250:1900) under the same rules
 #control_socket = "/run/discowall/control.sock"
 #rules_file = "/etc/discowall/rules.toml"
 #dedup_window_ms = 500               # an identical packet within this window is dropped (a second reflector)
@@ -113,6 +114,7 @@ case-insensitively, with `*` and `?` globs.
 
 | Match | Meaning | Example |
 | --- | --- | --- |
+| `proto` | `mdns`, `ssdp`; absent: both | `proto ssdp` |
 | `in` | the interface the packet arrived on | `in iot` |
 | `out` | the interface it would be sent to | `out lan` |
 | `src` | the original source address or prefix | `src 192.168.30.0/24,fd00::/8` |
@@ -122,6 +124,10 @@ case-insensitively, with `*` and `?` globs.
 | `host` | host names | `host bridge,printer?` |
 | `rrtype` | record types, for a query the question's | `rrtype AAAA` |
 | action | `accept` or `drop`, `log` writes a journal line per hit | `accept log` |
+
+For SSDP, `service` is the NT/ST (`upnp:rootdevice`, `urn:schemas-upnp-org:device:MediaRenderer:1`, `ssdp:all`),
+`instance` the device's `uuid:…` and `host` the host of its LOCATION URL; `kind` is `query` for M-SEARCH,
+`announce` for alive/byebye/update and `response` for a search answer.
 
 A rule on a host or a service applies to the whole bundle that a service is: its PTR, SRV, TXT and A/AAAA
 records, which arrive in separate packets. The daemon keeps a table of what each interface announced (instance →
@@ -184,6 +190,10 @@ discoctl rule add in guest drop
 discoctl rule add in lan out iot kind query service _googlecast._tcp accept
 discoctl rule add in iot out lan kind response,announce service _googlecast._tcp accept
 
+# UPnP: the LAN may search the IoT network, the media renderer announces back
+discoctl rule add proto ssdp in lan out iot kind query accept
+discoctl rule add proto ssdp in iot out lan kind announce,response service urn:schemas-upnp-org:device:MediaRenderer:1,upnp:rootdevice accept
+
 # Sonos: one host, by name
 discoctl rule add in lan out media kind query service _sonos._tcp accept
 discoctl rule add in media out lan kind response,announce host "sonos*" accept
@@ -227,6 +237,10 @@ or, for one-shot queries, `asked` and `relayed`. The rules that decided are in p
   the QU bit is cleared, link-local address records are removed, the TTL is 255.
 - Loops: never back onto the arriving interface, packets from the router's own addresses are dropped, an identical
   packet within the dedup window is dropped.
+- SSDP (UPnP, 239.255.255.250:1900 / ff02::c) uses a second pair of sockets. NOTIFY messages are forwarded under
+  the rules; an M-SEARCH is always proxied, because UPnP answers go by unicast to the searcher's port: the daemon
+  searches on the allowed interfaces from an ephemeral socket, collects the answers for MX seconds and relays them
+  to the searcher from port 1900. A LOCATION on a link-local address is dropped.
 - A query from an ephemeral port (`dig @224.0.0.251 -p 5353`, one-shot libraries) cannot be reflected: the
   daemon asks on the allowed interfaces from an ephemeral socket of its own, collects the unicast answers for a
   short window, runs them through the rules and relays them to the querier by unicast from port 5353.
@@ -252,7 +266,7 @@ estimate, record of the decisions) is in [mdns-router-research.md](mdns-router-r
   deduplication, fuzzing, unit hardening
 - 🕵️ **P4:** packages (tarball, deb, rpm, OpenWrt), cross builds, release workflow, README and man pages
 - 💤 nftables sets with the addresses of allowed hosts
-- 💤 SSDP (UPnP) as a second protocol
+- 🕵️ SSDP (UPnP) as a second protocol
 - 💤 FreeBSD backend and pfSense package
 - ✅ Concept: rule model, CLI and runtime discussed with the maintainer
 

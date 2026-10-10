@@ -4,7 +4,7 @@
 //! the answers to the core, which relays them to the querier by unicast after the rules had their
 //! say.
 
-use crate::socket::{Family, MdnsSocket, Received, ReplyTo, SocketFactory};
+use crate::socket::{Family, MdnsSocket, Proto, Received, ReplyTo, SocketFactory};
 use anyhow::Result;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -16,13 +16,14 @@ use tracing::{debug, warn};
 /// runs on its own thread.
 pub fn ask(
     factory: &SocketFactory,
+    proto: Proto,
     family: Family,
     queries: Vec<(Vec<u8>, u32)>,
     reply_to: ReplyTo,
     window: Duration,
     tx: mpsc::Sender<Received>,
 ) -> Result<()> {
-    let sock: Arc<dyn MdnsSocket> = factory(family, true)?;
+    let sock: Arc<dyn MdnsSocket> = factory(proto, family, true)?;
     for (bytes, ifindex) in &queries {
         if let Err(e) = sock.send_multicast(bytes, *ifindex) {
             warn!(ifindex, "proxy query not sent: {e:#}");
