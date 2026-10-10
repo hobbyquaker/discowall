@@ -10,7 +10,7 @@
 - 5. P3: legacy-query proxy and QU, fe80 stripping, IPv6 end to end, dedup, fuzzing, unit hardening ☑️ — [task-5.md](../roadmap-items/discowall/roadmap/task-5.md)
 - 4. P2: discoctl watch, hosts, services, stats, status; per-rule counters and log ☑️ — [task-4.md](../roadmap-items/discowall/roadmap/task-4.md)
 - 3. P1: parser, host table and record bundles, rule chain, control socket, discoctl rule commands ☑️ — [task-3.md](../roadmap-items/discowall/roadmap/task-3.md)
-- 2. P0: Cargo project, sockets, interface tracking, plain reflector with loop prevention, systemd unit ☑️ — [task-2.md](../roadmap-items/discowall/roadmap/task-2.md)
+- 2. P0: Cargo project, sockets, interface tracking, plain reflector with loop prevention, systemd unit 🕵️ — [task-2.md](../roadmap-items/discowall/roadmap/task-2.md)
 
 ## Archive
 

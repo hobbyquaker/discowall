@@ -67,7 +67,7 @@ estimate, record of the decisions) is in [mdns-router-research.md](mdns-router-r
 
 ## Roadmap
 
-- ☑️ **P0:** Cargo project, sockets, interface tracking over netlink, plain reflector with loop prevention,
+- 🕵️ **P0:** Cargo project, sockets, interface tracking over netlink, plain reflector with loop prevention,
   systemd unit
 - ☑️ **Lab:** measure coexistence with avahi-daemon on port 5353
 - ☑️ **P1:** parser, host table and record bundles, rule chain, control socket, `discoctl rule …`
@@ -80,7 +80,7 @@ estimate, record of the decisions) is in [mdns-router-research.md](mdns-router-r
 - 💤 FreeBSD backend and pfSense package
 - ✅ Concept: rule model, CLI and runtime discussed with the maintainer
 
-🏗️ in progress · ☑️ ready for implementation · 🤷 to be clarified · 💤 later · ✅ done
+🏗️ in progress · 🕵️ built, under test · ☑️ ready for implementation · 🤷 to be clarified · 💤 later · ✅ done
 
 ## Credits and licences
 

@@ -1,0 +1,15 @@
+# /etc/discowall/discowall.toml — discowalld's configuration.
+
+# The interfaces to forward between, by name. One that does not exist yet is waited for.
+interfaces = ["lan", "iot"]
+
+# Address families (both on by default).
+#ipv4 = true
+#ipv6 = true
+
+# Where discoctl talks to the daemon.
+#control_socket = "/run/discowall/control.sock"
+
+# A packet identical to one seen within this window is dropped (a second reflector, a bridge that
+# delivers twice). mDNS repeats announcements no faster than once per second.
+#dedup_window_ms = 500

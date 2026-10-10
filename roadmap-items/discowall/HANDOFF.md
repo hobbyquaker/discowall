@@ -2,6 +2,16 @@
 
 The newest five dated entries; older ones move to `handoff-archive/<date>.md`.
 
+## 2026-10-10 (later) — P0 built: the plain reflector works in network namespaces
+
+- Task 2 is 🕵️: workspace with `discowalld`, `discoctl` and the protocol crate; sockets behind the `MdnsSocket`
+  trait; rtnetlink interface tracking; forward-everything with own-source drop and dedup; control socket with
+  `status`/`ping`; systemd unit; config example; 8 unit tests and the netns integration test (details in the item).
+  Gate green locally; `.github/workflows/ci.yml` written, never run (no remote).
+- **Rust 1.99 is installed** via rustup (`~/.cargo/bin`, not on PATH in non-login shells: `export PATH=$HOME/.cargo/bin:$PATH`).
+- **Assumed, not decided:** OQ-10 default policy `drop` (not used before P1). Nothing else was decided.
+- Next: the maintainer creates the GitHub remote and pushes (CI), tries it on a router; then task 3 (P1).
+
 ## 2026-10-10 — research, Q&A, decisions D-1…D-9, phase items filed; no code
 
 - The maintainer's ask (verbatim in the research): a tool on a Linux router that forwards mDNS between interfaces like

@@ -1,0 +1,38 @@
+[Unit]
+Description=discowall: forwards mDNS between interfaces under rules
+Documentation=https://github.com/hobbyquaker/discowall
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/discowalld --config /etc/discowall/discowall.toml
+Restart=on-failure
+RestartSec=2
+DynamicUser=yes
+RuntimeDirectory=discowall
+RuntimeDirectoryMode=0755
+ConfigurationDirectory=discowall
+# Port 5353 and multicast joins need no capability; netlink notifications need none either.
+CapabilityBoundingSet=
+AmbientCapabilities=
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallFilter=@system-service
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

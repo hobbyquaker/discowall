@@ -69,7 +69,7 @@ Personentage für die erste Version.
 
 ## Roadmap
 
-- ☑️ **P0:** Cargo-Projekt, Sockets, Schnittstellen-Überwachung per Netlink, einfacher Reflector mit
+- 🕵️ **P0:** Cargo-Projekt, Sockets, Schnittstellen-Überwachung per Netlink, einfacher Reflector mit
   Schleifenschutz, systemd-Unit
 - ☑️ **Lab:** Koexistenz mit avahi-daemon auf Port 5353 messen
 - ☑️ **P1:** Parser, Host-Tabelle und Record-Bündel, Regelkette, Steuer-Socket, `discoctl rule …`
@@ -82,7 +82,7 @@ Personentage für die erste Version.
 - 💤 FreeBSD-Backend und pfSense-Paket
 - ✅ Konzept: Regelmodell, CLI, Laufzeit mit dem Maintainer besprochen
 
-🏗️ in Arbeit · ☑️ bereit zur Umsetzung · 🤷 noch zu klären · 💤 später · ✅ erledigt
+🏗️ in Arbeit · 🕵️ gebaut, in Prüfung · ☑️ bereit zur Umsetzung · 🤷 noch zu klären · 💤 später · ✅ erledigt
 
 ## Credits und Lizenzen
 
