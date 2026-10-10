@@ -22,8 +22,8 @@ The newest five dated entries; older ones move to `handoff-archive/<date>.md`.
   control handling, `control.rs` unix socket, `tests/netns.rs` + `tests/mdns_probe.py`), `crates/discoctl`,
   `contrib/` (config example, rules example, systemd unit).
 - **State of the items:** 2–6 (P0–P4, the whole v1) are 🕵️ — green locally and in CI, never on a real router,
-  the release workflow never run (needs a tag). 10 (lab: avahi coexistence on 5353) is ☑️ and needs the lab; 7, 8,
-  9 are 💤.
+  8 (SSDP) is 🕵️ as well; the release workflow is proven by v0.0.1. 10 (lab: avahi coexistence) is ☑️ and needs
+  the lab, 11 (Proxmox lab) 🤷, 12 (avahi in the namespace test) ☑️; 7, 9 are 💤.
 - **Open for the maintainer:** OQ-10 the default policy of a fresh install (the code assumes `drop`); OQ-11 which
   router and VLANs are the lab for task 10 and for packet captures as parser fixtures (nothing lab-specific goes
   into the repository). The directory rename. A try of P0/P1 on a router: `discowalld --config`, `discoctl status`,
@@ -32,7 +32,18 @@ The newest five dated entries; older ones move to `handoff-archive/<date>.md`.
   interface, not per packet; the proxy opens one ephemeral socket per legacy query (fine for `dig`, a flood would
   need a cap); `cargo test -p discowalld` does not rebuild `discoctl` for the namespace test (`cargo build --all`
   first); the README's Roadmap list is hand-maintained in both languages and must be updated with every
-  `roadmap.py state`; the release workflow and the OpenWrt package are untested.
+  `roadmap.py state`; the OpenWrt package is untested; SSDP over IPv6 (ff02::c) is implemented but only v4-tested.
+
+## 2026-10-10 (release) — v0.0.1 on GitHub, end-to-end testing proposed
+
+- **Release `v0.0.1`** tagged and published on the maintainer's word; the release workflow succeeded on its first
+  run (three musl targets, tarballs, deb, rpm, nine assets). CI green on `master`.
+- **End-to-end testing:** [notes/e2e-testing-research.md](notes/e2e-testing-research.md) proposes a Proxmox lab
+  of three LXC containers on a VLAN-aware bridge driven by `tests/lab/lab.py` over SSH (task 11, 🤷, needs the
+  maintainer's answers on VLAN tags and SSH access), avahi inside the namespace test on GitHub (task 12, ☑️), and
+  a manual per-release checklist on the real router.
+- **Next:** the maintainer answers task 11's questions and OQ-10/OQ-11; tries v0.0.1 on a router (tasks 2–6 and
+  8 → ✅); a session can take task 12 without the lab.
 
 ## 2026-10-10 (late night) — SSDP in, version set to 0.0.1 for the first release
 

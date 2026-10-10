@@ -29,3 +29,9 @@
   whitelist/blacklist), Recipes (HomeKit, AirPlay/Spotify, printers, Cast with a guest block, Sonos), the firewall
   reminder with the ports, discoctl, How it works. `cargo install --git` works for source installs.
 - **Not done:** nothing of P4's list; what is listed as untested needs the first tag and an OpenWrt host.
+
+**2026-10-10, later:** the release workflow ran for the first time on the tag `v0.0.1` (the maintainer's word) and
+**succeeded on the first run**: three musl targets with `cross`, tarballs, `.deb` for amd64/arm64/armhf, `.rpm` for
+x86_64/aarch64/armv7hl, nine assets on
+[github.com/hobbyquaker/discowall/releases/tag/v0.0.1](https://github.com/hobbyquaker/discowall/releases/tag/v0.0.1).
+Untested still: the OpenWrt package (needs a build host) and installing the packages on real systems (lab, task 11).
