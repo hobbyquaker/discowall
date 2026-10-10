@@ -3,8 +3,8 @@
 use anyhow::{bail, Context, Result};
 use clap::{Args as ClapArgs, Parser, Subcommand};
 use discowall_proto::{
-    Action, HostView, PacketKind, Request, Response, RuleList, RuleSpec, Status, TestResult,
-    TestSpec,
+    Action, HostView, PacketKind, Request, Response, RuleList, RuleSpec, ServiceView, StatsView,
+    Status, TestResult, TestSpec, WatchEvent,
 };
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
@@ -48,6 +48,16 @@ enum Cmd {
     Apply,
     /// The host table: what each interface has announced.
     Hosts,
+    /// The service instances each interface has announced.
+    Services,
+    /// Counters per interface and per rule.
+    Stats,
+    /// Live: one line per packet with its decisions, until Ctrl-C.
+    Watch {
+        /// Only packets arriving on this interface.
+        #[arg(short, long)]
+        iface: Option<String>,
+    },
 }
 
 #[derive(ClapArgs, Debug)]
@@ -212,6 +222,9 @@ fn run(cli: &Cli) -> Result<ExitCode> {
         Cmd::Save => Request::RuleSave,
         Cmd::Apply => Request::RuleApply,
         Cmd::Hosts => Request::Hosts,
+        Cmd::Services => Request::Services,
+        Cmd::Stats => Request::Stats,
+        Cmd::Watch { iface } => return watch(cli, iface.clone()),
         Cmd::Rule(r) => match &r.cmd {
             RuleSub::List => Request::RuleList,
             RuleSub::Add { tokens } => Request::RuleAdd {
@@ -242,12 +255,131 @@ fn run(cli: &Cli) -> Result<ExitCode> {
         Response::Rules(l) => print_rules(&l),
         Response::Test(t) => print_test(&t),
         Response::Hosts { hosts } => print_hosts(&hosts),
+        Response::Services { services } => print_services(&services),
+        Response::Stats(st) => print_stats(&st),
+        Response::Event(ev) => print_event(&ev),
         Response::Error { message } => {
             eprintln!("discoctl: {message}");
             return Ok(ExitCode::from(1));
         }
     }
     Ok(ExitCode::SUCCESS)
+}
+
+fn watch(cli: &Cli, iface: Option<String>) -> Result<ExitCode> {
+    let stream = UnixStream::connect(&cli.socket)
+        .with_context(|| format!("connecting {}", cli.socket.display()))?;
+    let mut wr = stream.try_clone()?;
+    let mut line = serde_json::to_string(&Request::Watch { iface })?;
+    line.push('\n');
+    wr.write_all(line.as_bytes())?;
+    let rd = BufReader::new(stream);
+    let stdout = std::io::stdout();
+    for line in rd.lines() {
+        let line = line?;
+        let resp: Response = serde_json::from_str(&line).context("the daemon's answer")?;
+        let mut out = stdout.lock();
+        let result = if cli.json {
+            writeln!(out, "{line}")
+        } else {
+            match resp {
+                Response::Event(ev) => writeln!(out, "{}", format_event(&ev)),
+                Response::Error { message } => writeln!(out, "! {message}"),
+                _ => Ok(()),
+            }
+        };
+        // A closed pipe (`discoctl watch | head`) ends the watch quietly.
+        if result.is_err() {
+            return Ok(ExitCode::SUCCESS);
+        }
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+fn format_event(ev: &WatchEvent) -> String {
+    let secs = ev.ts_ms / 1000;
+    let (h, m, s) = ((secs / 3600) % 24, (secs / 60) % 60, secs % 60);
+    let mut names: Vec<String> = Vec::new();
+    names.extend(ev.services.iter().cloned());
+    names.extend(ev.instances.iter().map(|i| format!("\"{i}\"")));
+    names.extend(ev.hosts.iter().cloned());
+    let out = ev
+        .out
+        .iter()
+        .map(|d| {
+            let rules = if d.rules.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "({})",
+                    d.rules
+                        .iter()
+                        .map(|r| r.to_string())
+                        .collect::<Vec<_>>()
+                        .join(",")
+                )
+            };
+            let dropped = if d.dropped > 0 && d.result != "dropped" {
+                format!("-{}", d.dropped)
+            } else {
+                String::new()
+            };
+            format!("{} {}{}{}", d.iface, d.result, rules, dropped)
+        })
+        .collect::<Vec<_>>()
+        .join("  ");
+    format!(
+        "{h:02}:{m:02}:{s:02}.{:03} {:<8} {:<21} {:<9} {:<40} -> {}",
+        ev.ts_ms % 1000,
+        ev.iface,
+        ev.src,
+        ev.kind,
+        names.join(" "),
+        out
+    )
+}
+
+fn print_event(ev: &WatchEvent) {
+    println!("{}", format_event(ev));
+}
+
+fn print_services(services: &[ServiceView]) {
+    println!(
+        "{:<10} {:<22} {:<36} {:<24} {:>5} {:>7}",
+        "iface", "service", "instance", "host", "port", "expires"
+    );
+    for s in services {
+        println!(
+            "{:<10} {:<22} {:<36} {:<24} {:>5} {:>6}s",
+            s.iface,
+            s.service,
+            s.instance,
+            s.host.as_deref().unwrap_or("-"),
+            s.port.map(|p| p.to_string()).unwrap_or_else(|| "-".into()),
+            s.expires_in_s
+        );
+    }
+}
+
+fn print_stats(st: &StatsView) {
+    let c = &st.counters;
+    println!(
+        "up {}s  rx {}  tx {}  hosts {}  instances {}",
+        st.uptime_s, c.rx, c.tx, st.hosts, st.instances
+    );
+    println!(
+        "dropped: own-source {}  duplicate {}  unparsable {}  by-rules {}  unknown-interface {}  records {}  send-errors {}",
+        c.dropped_own_source, c.dropped_duplicate, c.dropped_unparsable, c.dropped_by_rules, c.dropped_unknown_interface, c.records_dropped, c.send_errors
+    );
+    println!("{:<12} {:>10} {:>10}", "interface", "rx", "tx");
+    for i in &st.interfaces {
+        println!("{:<12} {:>10} {:>10}", i.name, i.rx, i.tx);
+    }
+    println!("{:>4} {:>10}  rule", "#", "hits");
+    for r in &st.rules {
+        println!("{:>4} {:>10}  {}", r.index, r.hits, r.rule);
+    }
+    println!("{:>4} {:>10}  default", "-", st.default_hits);
 }
 
 fn print_status(s: &Status) {

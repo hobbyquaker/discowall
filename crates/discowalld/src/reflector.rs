@@ -9,8 +9,8 @@ use crate::rules::{self, Chain, Subject, Verdict};
 use crate::socket::{Family, MdnsSocket, Received};
 use anyhow::{Context, Result};
 use discowall_proto::{
-    Action, Counters, InterfaceStatus, PacketKind, Request, Response, RuleSet, Status, TestResult,
-    TestSpec,
+    Action, Counters, InterfaceStats, InterfaceStatus, PacketKind, Request, Response, RuleSet,
+    RuleStats, StatsView, Status, TestResult, TestSpec, WatchDecision, WatchEvent,
 };
 use hickory_proto::op::Message;
 use std::collections::hash_map::DefaultHasher;
@@ -20,6 +20,7 @@ use std::net::IpAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tokio::sync::broadcast;
 use tracing::{debug, info, warn};
 
 #[derive(Debug, Default, Clone)]
@@ -51,6 +52,8 @@ pub struct Reflector {
     unsaved: bool,
     hosts: HostTable,
     pub counters: Counters,
+    /// `discoctl watch` subscribers; nobody listening is fine.
+    pub events: broadcast::Sender<WatchEvent>,
 }
 
 fn kind_of(k: Kind) -> PacketKind {
@@ -122,6 +125,7 @@ impl Reflector {
             unsaved: false,
             hosts: HostTable::default(),
             counters: Counters::default(),
+            events: broadcast::channel(256).0,
         })
     }
 
@@ -316,17 +320,23 @@ impl Reflector {
         in_iface: &str,
         out_iface: &str,
         src: IpAddr,
-    ) -> Option<Vec<u8>> {
+    ) -> Filtered {
         let kind = kind_of(pkt.kind);
         let mut keep_q = Vec::with_capacity(pkt.questions.len());
         let mut keep_r = Vec::with_capacity(pkt.records.len());
         let mut dropped = 0usize;
+        let mut rules_hit: Vec<usize> = Vec::new();
         let mut log_hits: Vec<(Verdict, String)> = Vec::new();
         for q in &pkt.questions {
             let subject = self.subject(in_iface, out_iface, src, kind, &[&q.name], Some(q.rtype));
             let v = self.chain.decide(&subject);
             if v.log {
                 log_hits.push((v, format!("{} {}", q.rtype, q.name)));
+            }
+            if let Some(n) = v.rule {
+                if !rules_hit.contains(&n) {
+                    rules_hit.push(n);
+                }
             }
             keep_q.push(v.action == Action::Accept);
             if v.action != Action::Accept {
@@ -344,6 +354,11 @@ impl Reflector {
             let v = self.chain.decide(&subject);
             if v.log {
                 log_hits.push((v, format!("{} {}", r.rtype, r.name)));
+            }
+            if let Some(n) = v.rule {
+                if !rules_hit.contains(&n) {
+                    rules_hit.push(n);
+                }
             }
             keep_r.push(v.action == Action::Accept);
             if v.action != Action::Accept {
@@ -371,13 +386,47 @@ impl Reflector {
                 .zip(&keep_r)
                 .any(|(r, k)| *k && r.section == Section::Answer)
         };
-        if !alive {
-            return None;
+        let bytes = if !alive {
+            None
+        } else if dropped == 0 {
+            Some(original.to_vec())
+        } else {
+            Some(rebuild(&pkt.message, &keep_q, &keep_r))
+        };
+        Filtered {
+            bytes,
+            dropped,
+            rules: rules_hit,
         }
-        if dropped == 0 {
-            return Some(original.to_vec());
+    }
+
+    fn emit(
+        &self,
+        in_iface: &str,
+        pkt: &Received,
+        kind: String,
+        parsed: Option<&Packet>,
+        out: Vec<WatchDecision>,
+    ) {
+        if self.events.receiver_count() == 0 {
+            return;
         }
-        Some(rebuild(&pkt.message, &keep_q, &keep_r))
+        let ts_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        let ev = WatchEvent {
+            ts_ms,
+            iface: in_iface.to_string(),
+            src: pkt.src.to_string(),
+            len: pkt.data.len(),
+            kind,
+            services: parsed.map(|p| p.service_types()).unwrap_or_default(),
+            instances: parsed.map(|p| p.instances()).unwrap_or_default(),
+            hosts: parsed.map(|p| p.hosts()).unwrap_or_default(),
+            out,
+        };
+        let _ = self.events.send(ev);
     }
 
     /// One packet in. Returns the names of the interfaces it was sent to.
@@ -385,16 +434,25 @@ impl Reflector {
         self.counters.rx += 1;
         let Some(in_name) = self.index_to_name.get(&pkt.ifindex).cloned() else {
             self.counters.dropped_unknown_interface += 1;
+            self.emit(
+                &format!("#{}", pkt.ifindex),
+                &pkt,
+                "unknown-interface".into(),
+                None,
+                vec![],
+            );
             return vec![];
         };
         self.ifaces.get_mut(&in_name).expect("configured").rx += 1;
         if self.own_addrs.contains_key(&pkt.src.ip()) {
             self.counters.dropped_own_source += 1;
+            self.emit(&in_name, &pkt, "own-source".into(), None, vec![]);
             return vec![];
         }
         if self.is_duplicate(&pkt.data) {
             self.counters.dropped_duplicate += 1;
             debug!(iface = %in_name, src = %pkt.src, "duplicate dropped");
+            self.emit(&in_name, &pkt, "duplicate".into(), None, vec![]);
             return vec![];
         }
         let parsed = match Packet::parse(&pkt.data) {
@@ -402,6 +460,7 @@ impl Reflector {
             Err(e) => {
                 self.counters.dropped_unparsable += 1;
                 debug!(iface = %in_name, src = %pkt.src, len = pkt.data.len(), "unparsable, dropped: {e}");
+                self.emit(&in_name, &pkt, "unparsable".into(), None, vec![]);
                 return vec![];
             }
         };
@@ -409,32 +468,65 @@ impl Reflector {
         let Some(socket) = self.socket(pkt.family).cloned() else {
             return vec![];
         };
-        let targets: Vec<(String, u32)> = self
+        let targets: Vec<(String, Option<u32>)> = self
             .names
             .iter()
             .filter(|n| **n != in_name)
-            .filter_map(|n| {
+            .map(|n| {
                 let i = &self.ifaces[n];
-                (i.up && i.joined.contains(&pkt.family))
-                    .then(|| (n.clone(), i.index.expect("up implies index")))
+                (
+                    n.clone(),
+                    (i.up && i.joined.contains(&pkt.family))
+                        .then(|| i.index.expect("up implies index")),
+                )
             })
             .collect();
         let mut sent = Vec::with_capacity(targets.len());
+        let mut decisions = Vec::with_capacity(targets.len());
         let mut filtered_out = 0;
         for (name, index) in targets {
-            let Some(bytes) = self.filter(&parsed, &pkt.data, &in_name, &name, pkt.src.ip()) else {
+            let Some(index) = index else {
+                decisions.push(WatchDecision {
+                    iface: name,
+                    result: "down".into(),
+                    dropped: 0,
+                    rules: vec![],
+                });
+                continue;
+            };
+            let f = self.filter(&parsed, &pkt.data, &in_name, &name, pkt.src.ip());
+            let Some(bytes) = f.bytes else {
                 filtered_out += 1;
+                decisions.push(WatchDecision {
+                    iface: name,
+                    result: "dropped".into(),
+                    dropped: f.dropped,
+                    rules: f.rules,
+                });
                 continue;
             };
             match socket.send_multicast(&bytes, index) {
                 Ok(()) => {
                     self.counters.tx += 1;
                     self.ifaces.get_mut(&name).expect("configured").tx += 1;
+                    let result = if f.dropped == 0 { "sent" } else { "partial" };
+                    decisions.push(WatchDecision {
+                        iface: name.clone(),
+                        result: result.into(),
+                        dropped: f.dropped,
+                        rules: f.rules,
+                    });
                     sent.push(name);
                 }
                 Err(e) => {
                     self.counters.send_errors += 1;
                     warn!(iface = %name, "send failed: {e:#}");
+                    decisions.push(WatchDecision {
+                        iface: name,
+                        result: "error".into(),
+                        dropped: f.dropped,
+                        rules: f.rules,
+                    });
                 }
             }
         }
@@ -442,6 +534,13 @@ impl Reflector {
             self.counters.dropped_by_rules += 1;
         }
         debug!(iface = %in_name, src = %pkt.src, len = pkt.data.len(), to = ?sent, "{}", parsed.summary());
+        self.emit(
+            &in_name,
+            &pkt,
+            parsed.kind.to_string(),
+            Some(&parsed),
+            decisions,
+        );
         sent
     }
 
@@ -504,6 +603,45 @@ impl Reflector {
             Request::Hosts => Response::Hosts {
                 hosts: self.hosts.view(Instant::now()),
             },
+            Request::Services => Response::Services {
+                services: self.hosts.services(Instant::now()),
+            },
+            Request::Stats => Response::Stats(self.stats()),
+            // Streaming is the control task's business; it never sends this to the core.
+            Request::Watch { .. } => Response::Error {
+                message: "watch is handled by the control socket".into(),
+            },
+        }
+    }
+
+    fn stats(&self) -> StatsView {
+        let (hosts, instances) = self.hosts.counts();
+        StatsView {
+            uptime_s: self.started.elapsed().as_secs(),
+            counters: self.counters.clone(),
+            interfaces: self
+                .names
+                .iter()
+                .map(|n| InterfaceStats {
+                    name: n.clone(),
+                    rx: self.ifaces[n].rx,
+                    tx: self.ifaces[n].tx,
+                })
+                .collect(),
+            rules: self
+                .chain
+                .rules
+                .iter()
+                .enumerate()
+                .map(|(i, r)| RuleStats {
+                    index: i + 1,
+                    hits: r.hits,
+                    rule: r.spec.to_string(),
+                })
+                .collect(),
+            default_hits: self.chain.default_hits,
+            hosts,
+            instances,
         }
     }
 
@@ -561,6 +699,13 @@ impl Reflector {
             counters: self.counters.clone(),
         }
     }
+}
+
+/// The outcome of `filter` for one target interface.
+struct Filtered {
+    bytes: Option<Vec<u8>>,
+    dropped: usize,
+    rules: Vec<usize>,
 }
 
 /// The message with only the kept questions and records, re-encoded.
@@ -809,6 +954,7 @@ action = "accept"
     #[test]
     fn homekit_rules_direction_and_bundles() {
         let (mut r, sock, _d) = setup(HOMEKIT);
+        let mut events = r.events.subscribe();
         let dropped = |r: &Reflector| r.counters.records_dropped;
         // lan asks for HomeKit: goes to iot only (guest is in no rule → default drop).
         assert_eq!(
@@ -874,6 +1020,39 @@ action = "accept"
         assert_eq!(out.instances(), vec!["living room._hap._tcp.local"]);
         let hosts = r.hosts.view(Instant::now());
         assert_eq!(hosts.len(), 2);
+        // The watch stream saw every packet with its decisions.
+        let first = events.try_recv().unwrap();
+        assert_eq!(first.kind, "query");
+        assert_eq!(first.services, vec!["_hap._tcp"]);
+        assert_eq!(first.out.len(), 2);
+        assert_eq!(
+            (
+                first.out[0].iface.as_str(),
+                first.out[0].result.as_str(),
+                &first.out[0].rules
+            ),
+            ("iot", "sent", &vec![1])
+        );
+        assert_eq!(
+            (
+                first.out[1].iface.as_str(),
+                first.out[1].result.as_str(),
+                first.out[1].dropped
+            ),
+            ("guest", "dropped", 1)
+        );
+        let mut last = first;
+        while let Ok(e) = events.try_recv() {
+            last = e;
+        }
+        assert_eq!(last.kind, "response");
+        assert_eq!(last.out[0].result, "partial");
+        assert_eq!(last.out[0].dropped, 1);
+        let st = r.stats();
+        assert_eq!(st.rules[1].hits, 4 + 1 + 1);
+        assert_eq!((st.hosts, st.instances), (2, 2));
+        assert_eq!(st.interfaces[1].rx, 5);
+        assert_eq!(r.hosts.services(Instant::now()).len(), 2);
     }
 
     #[test]

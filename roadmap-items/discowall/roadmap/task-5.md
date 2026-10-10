@@ -1,4 +1,4 @@
-## 5. P3: legacy-query proxy and QU, fe80 stripping, IPv6 end to end, dedup, fuzzing, unit hardening ☑️
+## 5. P3: legacy-query proxy and QU, fe80 stripping, IPv6 end to end, dedup, fuzzing, unit hardening 🏗️
 
 **Created** 2026-10-10.
 

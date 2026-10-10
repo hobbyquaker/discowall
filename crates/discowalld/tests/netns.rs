@@ -255,7 +255,15 @@ fn inner() {
         "drop (default)"
     );
 
-    // B announces the bridge and a camera; only the bridge's announcement reaches A.
+    // B announces the bridge and a camera; only the bridge's announcement reaches A. A watcher
+    // sees both packets with their decisions.
+    let mut watcher = Command::new(discoctl())
+        .arg("--socket")
+        .arg(&sock)
+        .args(["--json", "watch", "--iface", "b0"])
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
     let recv_a = a
         .run(&["python3"])
         .arg(probe())
@@ -286,6 +294,33 @@ fn inner() {
     );
     let hosts_json: serde_json::Value = serde_json::from_str(&ctl(&["--json", "hosts"])).unwrap();
     assert_eq!(hosts_json["result"], "hosts");
+    let services = ctl(&["services"]);
+    assert!(
+        services.contains("_hap._tcp") && services.contains("bridge._hap._tcp.local"),
+        "{services}"
+    );
+    let stats = ctl(&["stats"]);
+    assert!(
+        stats.contains("default")
+            && stats.contains("in b0 out a0 kind announce host bridge accept"),
+        "{stats}"
+    );
+    let stats_json: serde_json::Value = serde_json::from_str(&ctl(&["--json", "stats"])).unwrap();
+    assert_eq!(stats_json["rules"][0]["hits"], 4, "{stats_json}");
+
+    watcher.kill().unwrap();
+    let watched = watcher.wait_with_output().unwrap();
+    let lines: Vec<serde_json::Value> = String::from_utf8_lossy(&watched.stdout)
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(lines.len(), 2, "two announcements on b0: {lines:?}");
+    assert_eq!(lines[0]["kind"], "announce");
+    assert_eq!(lines[0]["hosts"][0], "camera.local");
+    assert_eq!(lines[0]["out"][0]["result"], "dropped");
+    assert_eq!(lines[1]["hosts"][0], "bridge.local");
+    assert_eq!(lines[1]["out"][0]["result"], "sent");
+    assert_eq!(lines[1]["out"][0]["rules"][0], 1);
 
     daemon.0.kill().unwrap();
     daemon.0.wait().unwrap();

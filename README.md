@@ -72,8 +72,8 @@ estimate, record of the decisions) is in [mdns-router-research.md](mdns-router-r
   systemd unit
 - ☑️ **Lab:** measure coexistence with avahi-daemon on port 5353
 - 🕵️ **P1:** parser, host table and record bundles, rule chain, control socket, `discoctl rule …`
-- ☑️ **P2:** `discoctl watch`, `hosts`, `services`, `stats`, `status`; per-rule counters, `log`
-- ☑️ **P3:** proxy for one-shot queries and the QU bit, link-local AAAA stripping, IPv6 end to end,
+- 🕵️ **P2:** `discoctl watch`, `hosts`, `services`, `stats`, `status`; per-rule counters, `log`
+- 🏗️ **P3:** proxy for one-shot queries and the QU bit, link-local AAAA stripping, IPv6 end to end,
   deduplication, fuzzing, unit hardening
 - ☑️ **P4:** packages (tarball, deb, rpm, OpenWrt), cross builds, release workflow, README and man pages
 - 💤 nftables sets with the addresses of allowed hosts

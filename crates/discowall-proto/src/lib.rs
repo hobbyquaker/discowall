@@ -28,6 +28,14 @@ pub enum Request {
     RuleApply,
     RuleTest(TestSpec),
     Hosts,
+    Services,
+    Stats,
+    /// Streams a `WatchEvent` per packet until the client disconnects; `iface` limits it to
+    /// packets arriving on that interface.
+    Watch {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        iface: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -38,8 +46,18 @@ pub enum Response {
     Rules(RuleList),
     Ok,
     Test(TestResult),
-    Hosts { hosts: Vec<HostView> },
-    Error { message: String },
+    Hosts {
+        hosts: Vec<HostView>,
+    },
+    Services {
+        services: Vec<ServiceView>,
+    },
+    Stats(StatsView),
+    /// One per packet while watching.
+    Event(WatchEvent),
+    Error {
+        message: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -359,4 +377,84 @@ pub struct InstanceView {
     pub instance: String,
     pub service: String,
     pub port: Option<u16>,
+}
+
+// ---- observability (P2) --------------------------------------------------------------------------
+
+/// What happened to one packet, as `discoctl watch` streams it: one JSON line per packet.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WatchEvent {
+    /// Milliseconds since the Unix epoch.
+    pub ts_ms: u64,
+    pub iface: String,
+    pub src: String,
+    pub len: usize,
+    /// `query`, `probe`, `response`, `announce`, or the reason it was dropped before the rules
+    /// (`own-source`, `duplicate`, `unparsable`, `unknown-interface`).
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub services: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub instances: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hosts: Vec<String>,
+    /// One entry per target interface.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub out: Vec<WatchDecision>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WatchDecision {
+    pub iface: String,
+    /// `sent`, `partial` (some records dropped), `dropped`, `down` (interface not usable), `error`.
+    pub result: String,
+    /// Records and questions removed by the rules.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub dropped: usize,
+    /// The 1-based rules that decided, deduplicated; empty means the default policy alone.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rules: Vec<usize>,
+}
+
+fn is_zero(n: &usize) -> bool {
+    *n == 0
+}
+
+/// One row of `discoctl services`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ServiceView {
+    pub iface: String,
+    pub service: String,
+    pub instance: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
+    pub expires_in_s: u64,
+}
+
+/// `discoctl stats`: the counters, per interface and per rule.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct StatsView {
+    pub uptime_s: u64,
+    pub counters: Counters,
+    pub interfaces: Vec<InterfaceStats>,
+    pub rules: Vec<RuleStats>,
+    pub default_hits: u64,
+    pub hosts: usize,
+    pub instances: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct InterfaceStats {
+    pub name: String,
+    pub rx: u64,
+    pub tx: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RuleStats {
+    pub index: usize,
+    pub hits: u64,
+    pub rule: String,
 }

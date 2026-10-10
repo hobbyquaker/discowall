@@ -102,9 +102,8 @@ async fn run(config: Config, config_path: String) -> Result<()> {
             error!("interface watcher ended: {e:#}");
         }
     });
-    tokio::spawn(control::serve(listener, query_tx));
-
     let mut core = reflector::Reflector::new(&config, config_path, sockets)?;
+    tokio::spawn(control::serve(listener, query_tx, core.events.clone()));
     let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
     let mut sighup = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup())?;
     let mut tick = tokio::time::interval(std::time::Duration::from_secs(5));

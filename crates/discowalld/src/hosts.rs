@@ -4,7 +4,7 @@
 //! applied to an A record that names only the host, and it is what `discoctl hosts` shows.
 
 use crate::packet::{self, Data, Packet, Section};
-use discowall_proto::{HostView, InstanceView};
+use discowall_proto::{HostView, InstanceView, ServiceView};
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::IpAddr;
 use std::time::{Duration, Instant};
@@ -159,6 +159,33 @@ impl HostTable {
             }
         }
         b
+    }
+
+    pub fn services(&self, now: Instant) -> Vec<ServiceView> {
+        let mut out = Vec::new();
+        for (iface, seg) in &self.segments {
+            for (name, i) in &seg.instances {
+                out.push(ServiceView {
+                    iface: iface.clone(),
+                    service: i.service.clone(),
+                    instance: name.clone(),
+                    host: i.host.clone(),
+                    port: i.port,
+                    expires_in_s: i.expires.saturating_duration_since(now).as_secs(),
+                });
+            }
+        }
+        out.sort_by(|a, b| {
+            (&a.iface, &a.service, &a.instance).cmp(&(&b.iface, &b.service, &b.instance))
+        });
+        out
+    }
+
+    /// (hosts, instances) over all segments.
+    pub fn counts(&self) -> (usize, usize) {
+        self.segments.values().fold((0, 0), |(h, i), s| {
+            (h + s.hosts.len(), i + s.instances.len())
+        })
     }
 
     pub fn view(&self, now: Instant) -> Vec<HostView> {
