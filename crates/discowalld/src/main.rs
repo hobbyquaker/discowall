@@ -3,6 +3,10 @@
 mod config;
 mod control;
 mod ifaces;
+// The classification API is the rule chain's (P1, in progress); until it lands, only the
+// summary is used.
+#[allow(dead_code)]
+mod packet;
 mod reflector;
 mod socket;
 

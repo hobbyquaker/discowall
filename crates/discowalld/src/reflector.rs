@@ -228,7 +228,13 @@ impl Reflector {
                 }
             }
         }
-        debug!(iface = %in_name, src = %pkt.src, len = pkt.data.len(), to = ?sent, "forwarded");
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            let what = match crate::packet::Packet::parse(&pkt.data) {
+                Ok(p) => p.summary(),
+                Err(e) => format!("unparsable ({e})"),
+            };
+            debug!(iface = %in_name, src = %pkt.src, len = pkt.data.len(), to = ?sent, "forwarded {what}");
+        }
         sent
     }
 

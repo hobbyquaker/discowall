@@ -70,7 +70,7 @@ estimate, record of the decisions) is in [mdns-router-research.md](mdns-router-r
 - 🕵️ **P0:** Cargo project, sockets, interface tracking over netlink, plain reflector with loop prevention,
   systemd unit
 - ☑️ **Lab:** measure coexistence with avahi-daemon on port 5353
-- ☑️ **P1:** parser, host table and record bundles, rule chain, control socket, `discoctl rule …`
+- 🏗️ **P1:** parser, host table and record bundles, rule chain, control socket, `discoctl rule …`
 - ☑️ **P2:** `discoctl watch`, `hosts`, `services`, `stats`, `status`; per-rule counters, `log`
 - ☑️ **P3:** proxy for one-shot queries and the QU bit, link-local AAAA stripping, IPv6 end to end,
   deduplication, fuzzing, unit hardening

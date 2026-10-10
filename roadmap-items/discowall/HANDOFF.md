@@ -10,7 +10,10 @@ The newest five dated entries; older ones move to `handoff-archive/<date>.md`.
   Gate green locally; `.github/workflows/ci.yml` written, never run (no remote).
 - **Rust 1.99 is installed** via rustup (`~/.cargo/bin`, not on PATH in non-login shells: `export PATH=$HOME/.cargo/bin:$PATH`).
 - **Assumed, not decided:** OQ-10 default policy `drop` (not used before P1). Nothing else was decided.
-- Next: the maintainer creates the GitHub remote and pushes (CI), tries it on a router; then task 3 (P1).
+- **Task 3 (P1) is 🏗️:** the parser module `packet.rs` is in (hickory-proto, classification, name helpers, 7 tests);
+  host table, rule chain, rebuild and the rule commands are next. 17 tests green, clippy clean.
+- Next: the maintainer creates the GitHub remote and pushes (CI), tries P0 on a router; the P1 lane continues with
+  the host table (research 3.5).
 
 ## 2026-10-10 — research, Q&A, decisions D-1…D-9, phase items filed; no code
 

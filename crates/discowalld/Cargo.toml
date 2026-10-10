@@ -11,6 +11,7 @@ anyhow = "1.0.104"
 clap = { version = "4.6.7", features = ["derive", "env"] }
 discowall-proto = { version = "0.1.0", path = "../discowall-proto" }
 futures-util = "0.3.34"
+hickory-proto = { version = "0.26.3", default-features = false, features = ["mdns"] }
 libc = "0.2.190"
 netlink-packet-core = "0.9.0"
 netlink-packet-route = "0.33.0"
