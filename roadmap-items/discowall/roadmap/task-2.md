@@ -32,7 +32,7 @@ on GitHub (no remote yet) and for a try on a real router.
   Skips with a message where user namespaces, `ip`, `nsenter` or `python3` are missing. Runs here in 2.4 s.
 - Gate: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test` — all green. CI workflow
   `.github/workflows/ci.yml` does the same plus a release build.
-- Release binaries (glibc, x86_64, stripped, LTO): discowalld ≈ 1.6 MiB, discoctl ≈ 0.7 MiB. musl targets come
+- Release binaries (glibc, x86_64, stripped, LTO): discowalld ≈ 3.1 MiB, discoctl ≈ 0.7 MiB. musl targets come
   with P4.
 
 **Open in this item:** the first CI run; a try on a real router (two VLAN interfaces, `discoctl status`, a browse
