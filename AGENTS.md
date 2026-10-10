@@ -56,7 +56,7 @@ items' header lines, newest first, tasks and bugs together, each with a link to 
   **The flag 🏆** may follow the state: the item needs Fable. The mapping lives in one place, `STATES` in the script.
 - **The title is short.** The ask, "(maintainer, date)", the status, commits and test results go into the item's body.
 - `roadmap-items/discowall/notes/` holds what is neither an item nor the overview: studies, appendices, backlogs.
-- **The README's Roadmap section** (`README.md` German, `README.en.md` English, the same list in both) is the public
+- **The README's Roadmap section** (`README.md` English, `README.de.md` German, the same list in both) is the public
   summary of the items, one line per item with its state emoji, hand-written as in hm-radio-simulator. Whoever
   changes an item's state with `roadmap.py state` updates that line in both READMEs in the same commit.
 
