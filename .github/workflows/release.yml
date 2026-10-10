@@ -1,0 +1,67 @@
+name: Release
+
+# A tag v* builds static musl binaries for three architectures, packs tarballs with the man pages,
+# the unit and the examples, builds .deb and .rpm packages, and attaches everything to the release.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            deb_arch: amd64
+            rpm_arch: x86_64
+          - target: aarch64-unknown-linux-musl
+            deb_arch: arm64
+            rpm_arch: aarch64
+          - target: armv7-unknown-linux-musleabihf
+            deb_arch: armhf
+            rpm_arch: armv7hl
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cross, cargo-deb, cargo-generate-rpm
+        run: |
+          cargo install cross --git https://github.com/cross-rs/cross --locked
+          cargo install cargo-deb cargo-generate-rpm --locked
+      - name: Build
+        run: cross build --release --target ${{ matrix.target }} --workspace
+      - name: Man pages (from the host build)
+        run: |
+          cargo build --release --workspace
+          target/release/discoctl generate-man target/man
+          target/release/discowalld --generate-man target/man
+      - name: Tarball
+        run: |
+          v=${GITHUB_REF_NAME#v}
+          d=discowall-$v-${{ matrix.target }}
+          mkdir -p $d/man
+          cp target/${{ matrix.target }}/release/discowalld target/${{ matrix.target }}/release/discoctl $d/
+          cp contrib/discowall.toml contrib/rules.toml contrib/discowalld.service README.md README.de.md LICENSE $d/
+          cp target/man/*.1 $d/man/
+          tar czf $d.tar.gz $d
+      - name: .deb
+        run: |
+          cargo deb -p discowalld --no-build --no-strip --target ${{ matrix.target }} --deb-version ${GITHUB_REF_NAME#v} -o discowall_${GITHUB_REF_NAME#v}_${{ matrix.deb_arch }}.deb
+      - name: .rpm
+        run: |
+          cargo generate-rpm -p crates/discowalld --target ${{ matrix.target }} --arch ${{ matrix.rpm_arch }} -o discowall-${GITHUB_REF_NAME#v}-1.${{ matrix.rpm_arch }}.rpm
+      - name: Check the packages
+        run: |
+          dpkg-deb --info discowall_*.deb
+          dpkg-deb --contents discowall_*.deb
+          rpm -qpl discowall-*.rpm
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            discowall-*.tar.gz
+            discowall_*.deb
+            discowall-*.rpm

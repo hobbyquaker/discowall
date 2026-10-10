@@ -57,14 +57,189 @@ Discovery is not the data path: the connection to the device found (TCP 51826 fo
 AirPlay) still needs a firewall rule. A later extension is to maintain the addresses of allowed hosts in
 nftables sets, so that exactly one such rule per network pair is enough.
 
+## Install
+
+Releases on GitHub carry static binaries for x86_64, aarch64 and armv7 (musl, no dependencies), as a tarball with
+the man pages, the systemd unit and the examples, and as `.deb` and `.rpm` packages. An OpenWrt package
+(`contrib/openwrt/`) is written but not yet built on a real build host.
+
+```sh
+# Debian, Ubuntu, Armbian
+sudo dpkg -i discowall_<version>_<arch>.deb
+# Fedora
+sudo rpm -i discowall-<version>-1.<arch>.rpm
+# any Linux: the tarball
+tar xzf discowall-<version>-<target>.tar.gz && cd discowall-*
+sudo install -m 755 discowalld discoctl /usr/local/bin/
+sudo install -d /etc/discowall && sudo install -m 644 discowall.toml rules.toml /etc/discowall/
+sudo install -m 644 discowalld.service /etc/systemd/system/ && sudo systemctl daemon-reload
+# from source (Rust stable)
+cargo install --git https://github.com/hobbyquaker/discowall discowalld discoctl
+```
+
+Then name the interfaces in `/etc/discowall/discowall.toml`, put rules into `/etc/discowall/rules.toml` (or add
+them with `discoctl` and `discoctl save`) and start the unit:
+
+```sh
+sudo systemctl enable --now discowalld
+discoctl status
+```
+
+The daemon runs as a dynamic user without capabilities: port 5353 and multicast joins need none. avahi-daemon may
+keep running on the same host; discowall only forwards and never answers for the router itself.
+
+## Configuration
+
+`/etc/discowall/discowall.toml`:
+
+```toml
+interfaces = ["lan", "iot"]          # by their Linux names; one that does not exist yet is waited for
+#ipv4 = true
+#ipv6 = true
+#control_socket = "/run/discowall/control.sock"
+#rules_file = "/etc/discowall/rules.toml"
+#dedup_window_ms = 500               # an identical packet within this window is dropped (a second reflector)
+#strip_link_local = true             # drop fe80::/10 and 169.254/16 address records: dead on another segment
+#legacy_window_ms = 500              # one-shot queries (dig) are asked on the querier's behalf; 0 drops them
+```
+
+`discowalld --check` validates it. `SIGHUP` reloads the rules file, not the interfaces.
+
+## Rules
+
+An ordered chain, first match wins, a default policy. A rule has matches and an action; every match left out
+matches everything, a list is any-of. Names are matched without their `.local` or `._service._proto.local` tail,
+case-insensitively, with `*` and `?` globs.
+
+| Match | Meaning | Example |
+| --- | --- | --- |
+| `in` | the interface the packet arrived on | `in iot` |
+| `out` | the interface it would be sent to | `out lan` |
+| `src` | the original source address or prefix | `src 192.168.30.0/24,fd00::/8` |
+| `kind` | `query`, `probe`, `response`, `announce` | `kind response,announce` |
+| `service` | service types | `service _hap._tcp,_airplay._tcp` |
+| `instance` | service instance names | `instance "living room*"` |
+| `host` | host names | `host bridge,printer?` |
+| `rrtype` | record types, for a query the question's | `rrtype AAAA` |
+| action | `accept` or `drop`, `log` writes a journal line per hit | `accept log` |
+
+A rule on a host or a service applies to the whole bundle that a service is: its PTR, SRV, TXT and A/AAAA
+records, which arrive in separate packets. The daemon keeps a table of what each interface announced (instance →
+service and host, host → addresses) and attributes every record through it. A packet is rebuilt with only the
+records that passed; a query with no question left, or a response with no answer left, is not sent.
+
+The file form, `/etc/discowall/rules.toml`:
+
+```toml
+default = "drop"
+
+[[rule]]
+in = "lan"
+out = "iot"
+kind = ["query"]
+service = ["_hap._tcp"]
+action = "accept"
+
+[[rule]]
+in = "iot"
+out = "lan"
+kind = ["response", "announce"]
+host = ["bridge"]
+action = "accept"
+log = true
+```
+
+The same through the CLI (the chain in the daemon changes at once; `save` writes the file, `apply` reloads it):
+
+```sh
+discoctl rule add in lan out iot kind query service _hap._tcp accept
+discoctl rule add in iot out lan kind response,announce host bridge accept log
+discoctl rule insert 1 src 192.168.40.0/24 drop comment "guests see nothing"
+discoctl rule list
+discoctl rule test in iot out lan kind announce host bridge      # → accept (rule 2)
+discoctl rule del 1
+discoctl save
+```
+
+Whitelist: `default = "drop"` plus accept rules. Blacklist: `default = "accept"` plus drop rules. A missing rules
+file means `drop` and no rules: nothing crosses until you say so.
+
+### Recipes
+
+```sh
+# HomeKit: the LAN may browse the IoT network, only the bridge answers
+discoctl rule add in lan out iot kind query service _hap._tcp accept
+discoctl rule add in iot out lan kind response,announce host bridge accept
+
+# AirPlay and Spotify Connect speakers in "media" are visible from the LAN, nothing from the LAN in "media"
+discoctl rule add in lan out media kind query service _airplay._tcp,_raop._tcp,_spotify-connect._tcp accept
+discoctl rule add in media out lan kind response,announce service _airplay._tcp,_raop._tcp,_spotify-connect._tcp accept
+
+# Printers everywhere
+discoctl rule add kind query service _ipp._tcp,_ipps._tcp,_printer._tcp,_pdl-datastream._tcp accept
+discoctl rule add kind response,announce service _ipp._tcp,_ipps._tcp,_printer._tcp,_pdl-datastream._tcp accept
+
+# Chromecast / Google Cast from the LAN to the IoT network, but not from the guest network
+discoctl rule add in guest drop
+discoctl rule add in lan out iot kind query service _googlecast._tcp accept
+discoctl rule add in iot out lan kind response,announce service _googlecast._tcp accept
+
+# Sonos: one host, by name
+discoctl rule add in lan out media kind query service _sonos._tcp accept
+discoctl rule add in media out lan kind response,announce host "sonos*" accept
+```
+
+Discovery is not the data path. Once a client has found a service it connects to the address in the A record,
+and that connection needs its own firewall rule (TCP 51826 for HomeKit, 631 for IPP, 7000 and 7100 for AirPlay,
+8008 and 8009 for Cast, 1400 for Sonos, and so on). A later version is to maintain the addresses of allowed hosts
+in nftables sets so that one static rule per network pair is enough.
+
+## discoctl
+
+```
+discoctl status                 interfaces, state, joined groups, addresses, counters
+discoctl rule list|add|insert N|del N|flush|test …
+discoctl save | apply           write the rules file | reload it
+discoctl hosts                  the table: hosts, addresses, instances, per interface
+discoctl services               the instances: service type, host, port, TTL left
+discoctl stats                  counters per interface and per rule
+discoctl watch [--iface X]      live: one line per packet with its decisions
+```
+
+Every command takes `--json` for scripts; `--socket` or `DISCOWALL_SOCKET` names the control socket. Exit codes:
+0 ok, 1 the daemon refused, 2 usage, 3 the daemon is unreachable. A `watch` line:
+
+```
+14:02:11.482 iot      10.1.0.5:5353         announce  _hap._tcp "living room" bridge.local   -> lan sent(2)  guest dropped
+```
+
+The result per target interface is `sent`, `partial` (some records dropped: the count follows), `dropped`, `down`
+or, for one-shot queries, `asked` and `relayed`. The rules that decided are in parentheses.
+
+## How it works
+
+- One UDP socket per address family on port 5353, bound to the wildcard address with `SO_REUSEADDR` and
+  `SO_REUSEPORT`, so avahi can hold the port too; `IP_PKTINFO` tells which interface a packet arrived on, and the
+  same control message chooses the egress interface per send. The group is joined on every configured interface
+  as rtnetlink reports it up. No raw sockets, no capabilities.
+- Every packet is parsed (hickory-proto). The host table learns from every packet, forwarded or not. For each
+  target interface the chain decides per question and per record; the packet is re-encoded if anything was dropped,
+  the QU bit is cleared, link-local address records are removed, the TTL is 255.
+- Loops: never back onto the arriving interface, packets from the router's own addresses are dropped, an identical
+  packet within the dedup window is dropped.
+- A query from an ephemeral port (`dig @224.0.0.251 -p 5353`, one-shot libraries) cannot be reflected: the
+  daemon asks on the allowed interfaces from an ephemeral socket of its own, collects the unicast answers for a
+  short window, runs them through the rules and relays them to the querier by unicast from port 5353.
+- Tests run in Linux network namespaces: a router namespace with the daemon between two veth leaves, real
+  multicast on both address families, rules driven through `discoctl`, the legacy proxy end to end.
+
 ## Status
 
 The research of 10 October 2026 (survey of avahi and the existing reflectors, design, assessment of Rust, effort
 estimate, record of the decisions) is in [mdns-router-research.md](mdns-router-research.md). The decisions are in
 [roadmap-items/discowall/decisions.md](roadmap-items/discowall/decisions.md), the tasks one by one in
 [roadmap-readmes/discowall.md](roadmap-readmes/discowall.md), the open questions in
-[roadmap-items/discowall/overview.md](roadmap-items/discowall/overview.md). The estimate for the first version is
-20 to 30 person-days.
+[roadmap-items/discowall/overview.md](roadmap-items/discowall/overview.md).
 
 ## Roadmap
 
@@ -75,7 +250,7 @@ estimate, record of the decisions) is in [mdns-router-research.md](mdns-router-r
 - 🕵️ **P2:** `discoctl watch`, `hosts`, `services`, `stats`, `status`; per-rule counters, `log`
 - 🕵️ **P3:** proxy for one-shot queries and the QU bit, link-local AAAA stripping, IPv6 end to end,
   deduplication, fuzzing, unit hardening
-- 🏗️ **P4:** packages (tarball, deb, rpm, OpenWrt), cross builds, release workflow, README and man pages
+- 🕵️ **P4:** packages (tarball, deb, rpm, OpenWrt), cross builds, release workflow, README and man pages
 - 💤 nftables sets with the addresses of allowed hosts
 - 💤 SSDP (UPnP) as a second protocol
 - 💤 FreeBSD backend and pfSense package

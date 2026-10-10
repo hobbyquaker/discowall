@@ -38,10 +38,19 @@ struct Args {
     /// Log level or filter (RUST_LOG syntax).
     #[arg(long, default_value = "info", env = "DISCOWALL_LOG")]
     log: String,
+    /// Write the man page into this directory and exit (packaging).
+    #[arg(long, hide = true, value_name = "DIR")]
+    generate_man: Option<PathBuf>,
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
+    if let Some(dir) = &args.generate_man {
+        use clap::CommandFactory;
+        std::fs::create_dir_all(dir)?;
+        clap_mangen::generate_to(Args::command(), dir)?;
+        return Ok(());
+    }
     let under_journal = std::env::var_os("JOURNAL_STREAM").is_some();
     let filter = tracing_subscriber::EnvFilter::try_new(&args.log).context("--log")?;
     let fmt = tracing_subscriber::fmt()

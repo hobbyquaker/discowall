@@ -58,6 +58,9 @@ enum Cmd {
         #[arg(short, long)]
         iface: Option<String>,
     },
+    /// Write the man pages into a directory (packaging).
+    #[command(hide = true)]
+    GenerateMan { dir: PathBuf },
 }
 
 #[derive(ClapArgs, Debug)]
@@ -216,6 +219,12 @@ fn parse_test(tokens: &[String]) -> Result<TestSpec> {
 }
 
 fn run(cli: &Cli) -> Result<ExitCode> {
+    if let Cmd::GenerateMan { dir } = &cli.cmd {
+        use clap::CommandFactory;
+        std::fs::create_dir_all(dir)?;
+        clap_mangen::generate_to(Cli::command(), dir)?;
+        return Ok(ExitCode::SUCCESS);
+    }
     let req = match &cli.cmd {
         Cmd::Status => Request::Status,
         Cmd::Ping => Request::Ping,
@@ -225,6 +234,7 @@ fn run(cli: &Cli) -> Result<ExitCode> {
         Cmd::Services => Request::Services,
         Cmd::Stats => Request::Stats,
         Cmd::Watch { iface } => return watch(cli, iface.clone()),
+        Cmd::GenerateMan { .. } => unreachable!(),
         Cmd::Rule(r) => match &r.cmd {
             RuleSub::List => Request::RuleList,
             RuleSub::Add { tokens } => Request::RuleAdd {

@@ -21,18 +21,34 @@ The newest five dated entries; older ones move to `handoff-archive/<date>.md`.
   hickory-proto, `hosts.rs` host table and bundles, `rules.rs` chain/globs/prefixes, `reflector.rs` the core and the
   control handling, `control.rs` unix socket, `tests/netns.rs` + `tests/mdns_probe.py`), `crates/discoctl`,
   `contrib/` (config example, rules example, systemd unit).
-- **State of the items:** 2 (P0) and 3 (P1) are 🕵️ — green locally and in CI, never on a real router. 4 (P2: `watch`, `services`, `stats`, `status` details, per-rule log), 5 (P3: legacy one-shot queries and the
-  QU bit, fe80 stripping, IPv6 end to end, dedup against a second reflector, fuzzing, unit hardening), 6 (P4:
-  packaging, cross builds, release workflow, docs) and 10 (lab: avahi coexistence on 5353) are ☑️; 7, 8, 9 are 💤.
+- **State of the items:** 2–6 (P0–P4, the whole v1) are 🕵️ — green locally and in CI, never on a real router,
+  the release workflow never run (needs a tag). 10 (lab: avahi coexistence on 5353) is ☑️ and needs the lab; 7, 8,
+  9 are 💤.
 - **Open for the maintainer:** OQ-10 the default policy of a fresh install (the code assumes `drop`); OQ-11 which
   router and VLANs are the lab for task 10 and for packet captures as parser fixtures (nothing lab-specific goes
   into the repository). The directory rename. A try of P0/P1 on a router: `discowalld --config`, `discoctl status`,
   a browse from one side, `discoctl hosts`.
-- **Known gaps worth knowing before the next item:** the QU bit is forwarded unchanged (P3 clears it); a query from
-  an ephemeral port is forwarded like any other and its unicast answer never comes back (P3 proxies it); fe80 AAAA
-  records cross (P3 strips them); IPv6 is implemented but only the v4 path is covered by the namespace test;
-  `records_dropped` counts per target interface, not per packet; the README's Roadmap list is hand-maintained in both
-  languages and must be updated with every `roadmap.py state`.
+- **Known gaps worth knowing before the next item:** `records_dropped` and `dropped_link_local` count per target
+  interface, not per packet; the proxy opens one ephemeral socket per legacy query (fine for `dig`, a flood would
+  need a cap); `cargo test -p discowalld` does not rebuild `discoctl` for the namespace test (`cargo build --all`
+  first); the README's Roadmap list is hand-maintained in both languages and must be updated with every
+  `roadmap.py state`; the release workflow and the OpenWrt package are untested.
+
+## 2026-10-10 (night) — P2, P3, P4 built; v1 is code-complete, untested on a router
+
+- **Task 4 (P2)** 🕵️: `discoctl watch` (broadcast of per-packet decisions, streamed as JSON lines), `services`,
+  `stats`. **Task 5 (P3)** 🕵️: the legacy-query proxy (ephemeral socket, answers relayed by unicast from 5353),
+  QU bit cleared, link-local address records stripped, IPv6 end to end in the namespace test, a 20 000-packet
+  robustness test of the parser. **Task 6 (P4)** 🕵️: man pages from clap, `.deb`/`.rpm` metadata (built locally
+  from the x86_64 musl binaries), the release workflow (three musl targets with `cross`, tarballs, deb, rpm on a
+  `v*` tag — never run), the OpenWrt package (never built), the READMEs with install, configuration, rules,
+  recipes, discoctl and how-it-works sections. 36 tests, clippy clean, CI green on every push.
+- **The README is English** (`README.md`), German is `README.de.md` (maintainer, 2026-10-10).
+- **The maintainer's next moves:** try it on a router (tasks 2–6 → ✅), decide OQ-10/OQ-11, tag `v0.1.0` to run
+  the release workflow for the first time (expect a fix or two in `cross`/`cargo-generate-rpm` paths), the
+  avahi-coexistence lab check (task 10), the directory rename.
+- **Left for later sessions:** tasks 7 (nftables sets), 8 (SSDP), 9 (FreeBSD/pfSense) are 💤; the dedup against
+  a second reflector and `systemd-analyze security` need a box with avahi and systemd.
 
 ## 2026-10-10 (evening) — pushed to GitHub
 

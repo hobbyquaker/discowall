@@ -58,6 +58,186 @@ Discovery ist nicht der Datenpfad: Die Verbindung zum gefundenen Gerät (TCP 518
 für AirPlay) braucht weiterhin eine Firewall-Regel. Ein späterer Ausbau soll die Adressen erlaubter Hosts in
 nftables-Sets pflegen, damit genau diese Regel pro Netzpaar reicht.
 
+## Installation
+
+Die Releases auf GitHub enthalten statische Binaries für x86_64, aarch64 und armv7 (musl, keine Abhängigkeiten)
+als Tarball mit Manpages, systemd-Unit und Beispielen sowie als `.deb`- und `.rpm`-Paket. Ein OpenWrt-Paket
+(`contrib/openwrt/`) ist geschrieben, aber noch auf keinem echten Build-Host gebaut.
+
+```sh
+# Debian, Ubuntu, Armbian
+sudo dpkg -i discowall_<version>_<arch>.deb
+# Fedora
+sudo rpm -i discowall-<version>-1.<arch>.rpm
+# jedes Linux: der Tarball
+tar xzf discowall-<version>-<target>.tar.gz && cd discowall-*
+sudo install -m 755 discowalld discoctl /usr/local/bin/
+sudo install -d /etc/discowall && sudo install -m 644 discowall.toml rules.toml /etc/discowall/
+sudo install -m 644 discowalld.service /etc/systemd/system/ && sudo systemctl daemon-reload
+# aus den Quellen (Rust stable)
+cargo install --git https://github.com/hobbyquaker/discowall discowalld discoctl
+```
+
+Dann die Schnittstellen in `/etc/discowall/discowall.toml` eintragen, Regeln in `/etc/discowall/rules.toml`
+schreiben (oder mit `discoctl` anlegen und mit `discoctl save` sichern) und die Unit starten:
+
+```sh
+sudo systemctl enable --now discowalld
+discoctl status
+```
+
+Der Daemon läuft als dynamischer Benutzer ohne Capabilities: Port 5353 und Multicast-Beitritte brauchen keine.
+avahi-daemon darf auf demselben Host weiterlaufen; discowall leitet nur weiter und antwortet nie für den Router.
+
+## Konfiguration
+
+`/etc/discowall/discowall.toml`:
+
+```toml
+interfaces = ["lan", "iot"]          # Linux-Namen; eine noch nicht vorhandene Schnittstelle wird abgewartet
+#ipv4 = true
+#ipv6 = true
+#control_socket = "/run/discowall/control.sock"
+#rules_file = "/etc/discowall/rules.toml"
+#dedup_window_ms = 500               # ein identisches Paket in diesem Fenster wird verworfen (zweiter Reflector)
+#strip_link_local = true             # fe80::/10- und 169.254/16-Adressrecords entfernen: im anderen Netz tot
+#legacy_window_ms = 500              # Einmal-Anfragen (dig) werden stellvertretend gestellt; 0 verwirft sie
+```
+
+`discowalld --check` prüft die Datei. `SIGHUP` lädt die Regeldatei neu, nicht die Schnittstellen.
+
+## Regeln
+
+Eine geordnete Kette, die erste Übereinstimmung gewinnt, eine Default-Policy. Eine Regel hat Kriterien und eine
+Aktion; ein weggelassenes Kriterium passt auf alles, eine Liste bedeutet "eines davon". Namen werden ohne ihren
+`.local`- bzw. `._service._proto.local`-Schwanz verglichen, ohne Beachtung der Groß- und Kleinschreibung, mit
+`*`- und `?`-Globs.
+
+| Kriterium | Bedeutung | Beispiel |
+| --- | --- | --- |
+| `in` | Schnittstelle, auf der das Paket ankam | `in iot` |
+| `out` | Schnittstelle, auf die es gesendet würde | `out lan` |
+| `src` | ursprüngliche Quelladresse oder Präfix | `src 192.168.30.0/24,fd00::/8` |
+| `kind` | `query`, `probe`, `response`, `announce` | `kind response,announce` |
+| `service` | Diensttypen | `service _hap._tcp,_airplay._tcp` |
+| `instance` | Instanznamen | `instance "living room*"` |
+| `host` | Hostnamen | `host bridge,printer?` |
+| `rrtype` | Record-Typen, bei Anfragen der der Frage | `rrtype AAAA` |
+| Aktion | `accept` oder `drop`, `log` schreibt pro Treffer eine Journal-Zeile | `accept log` |
+
+Eine Regel auf einen Host oder Dienst gilt für das ganze Bündel, das ein Dienst ist: seine PTR-, SRV-, TXT- und
+A/AAAA-Records, die in getrennten Paketen kommen. Der Daemon führt eine Tabelle dessen, was jede Schnittstelle
+angekündigt hat (Instanz → Dienst und Host, Host → Adressen), und ordnet jeden Record darüber zu. Ein Paket wird
+nur mit den durchgelassenen Records neu gebaut; eine Anfrage ohne verbliebene Frage oder eine Antwort ohne
+verbliebene Antwort wird nicht gesendet.
+
+Die Dateiform, `/etc/discowall/rules.toml`:
+
+```toml
+default = "drop"
+
+[[rule]]
+in = "lan"
+out = "iot"
+kind = ["query"]
+service = ["_hap._tcp"]
+action = "accept"
+
+[[rule]]
+in = "iot"
+out = "lan"
+kind = ["response", "announce"]
+host = ["bridge"]
+action = "accept"
+log = true
+```
+
+Dasselbe über die CLI (die Kette im Daemon ändert sich sofort; `save` schreibt die Datei, `apply` lädt sie):
+
+```sh
+discoctl rule add in lan out iot kind query service _hap._tcp accept
+discoctl rule add in iot out lan kind response,announce host bridge accept log
+discoctl rule insert 1 src 192.168.40.0/24 drop comment "Gäste sehen nichts"
+discoctl rule list
+discoctl rule test in iot out lan kind announce host bridge      # → accept (rule 2)
+discoctl rule del 1
+discoctl save
+```
+
+Whitelist: `default = "drop"` plus accept-Regeln. Blacklist: `default = "accept"` plus drop-Regeln. Eine fehlende
+Regeldatei bedeutet `drop` ohne Regeln: nichts geht durch, bis du es sagst.
+
+### Rezepte
+
+```sh
+# HomeKit: das LAN darf im IoT-Netz suchen, nur die Bridge antwortet
+discoctl rule add in lan out iot kind query service _hap._tcp accept
+discoctl rule add in iot out lan kind response,announce host bridge accept
+
+# AirPlay- und Spotify-Connect-Lautsprecher in "media" sind vom LAN aus sichtbar, nichts vom LAN in "media"
+discoctl rule add in lan out media kind query service _airplay._tcp,_raop._tcp,_spotify-connect._tcp accept
+discoctl rule add in media out lan kind response,announce service _airplay._tcp,_raop._tcp,_spotify-connect._tcp accept
+
+# Drucker überall
+discoctl rule add kind query service _ipp._tcp,_ipps._tcp,_printer._tcp,_pdl-datastream._tcp accept
+discoctl rule add kind response,announce service _ipp._tcp,_ipps._tcp,_printer._tcp,_pdl-datastream._tcp accept
+
+# Chromecast / Google Cast vom LAN ins IoT-Netz, aber nicht aus dem Gästenetz
+discoctl rule add in guest drop
+discoctl rule add in lan out iot kind query service _googlecast._tcp accept
+discoctl rule add in iot out lan kind response,announce service _googlecast._tcp accept
+
+# Sonos: ein Host, nach Namen
+discoctl rule add in lan out media kind query service _sonos._tcp accept
+discoctl rule add in media out lan kind response,announce host "sonos*" accept
+```
+
+Discovery ist nicht der Datenpfad. Hat ein Client einen Dienst gefunden, verbindet er sich mit der Adresse aus dem
+A-Record, und diese Verbindung braucht ihre eigene Firewall-Regel (TCP 51826 für HomeKit, 631 für IPP, 7000 und
+7100 für AirPlay, 8008 und 8009 für Cast, 1400 für Sonos usw.). Eine spätere Version soll die Adressen erlaubter
+Hosts in nftables-Sets pflegen, damit eine statische Regel pro Netzpaar reicht.
+
+## discoctl
+
+```
+discoctl status                 Schnittstellen, Zustand, Gruppen, Adressen, Zähler
+discoctl rule list|add|insert N|del N|flush|test …
+discoctl save | apply           Regeldatei schreiben | neu laden
+discoctl hosts                  die Tabelle: Hosts, Adressen, Instanzen, je Schnittstelle
+discoctl services               die Instanzen: Diensttyp, Host, Port, Rest-TTL
+discoctl stats                  Zähler je Schnittstelle und je Regel
+discoctl watch [--iface X]      live: eine Zeile pro Paket mit seinen Entscheidungen
+```
+
+Jeder Befehl kennt `--json` für Skripte; `--socket` oder `DISCOWALL_SOCKET` nennt den Steuer-Socket. Exit-Codes:
+0 ok, 1 der Daemon hat abgelehnt, 2 Bedienfehler, 3 Daemon nicht erreichbar. Eine `watch`-Zeile:
+
+```
+14:02:11.482 iot      10.1.0.5:5353         announce  _hap._tcp "living room" bridge.local   -> lan sent(2)  guest dropped
+```
+
+Das Ergebnis je Zielschnittstelle ist `sent`, `partial` (einige Records verworfen, die Zahl folgt), `dropped`,
+`down` oder bei Einmal-Anfragen `asked` und `relayed`. Die entscheidenden Regeln stehen in Klammern.
+
+## Wie es funktioniert
+
+- Ein UDP-Socket je Adressfamilie auf Port 5353, an die Wildcard-Adresse gebunden mit `SO_REUSEADDR` und
+  `SO_REUSEPORT`, damit avahi den Port auch halten kann; `IP_PKTINFO` sagt, auf welcher Schnittstelle ein Paket
+  ankam, und dieselbe Control-Message wählt beim Senden die Ausgangsschnittstelle. Die Gruppe wird auf jeder
+  konfigurierten Schnittstelle beigetreten, sobald rtnetlink sie als up meldet. Keine Raw-Sockets, keine
+  Capabilities.
+- Jedes Paket wird geparst (hickory-proto). Die Host-Tabelle lernt aus jedem Paket, weitergeleitet oder nicht.
+  Für jede Zielschnittstelle entscheidet die Kette pro Frage und pro Record; das Paket wird neu kodiert, wenn
+  etwas verworfen wurde, das QU-Bit gelöscht, Link-local-Adressrecords entfernt, die TTL ist 255.
+- Schleifen: nie zurück auf die Eingangsschnittstelle, Pakete von den eigenen Adressen des Routers werden
+  verworfen, ein identisches Paket im Dedup-Fenster ebenso.
+- Eine Anfrage von einem Ephemeral-Port (`dig @224.0.0.251 -p 5353`, Einmal-Bibliotheken) lässt sich nicht
+  spiegeln: Der Daemon fragt auf den erlaubten Schnittstellen von einem eigenen Ephemeral-Socket, sammelt die
+  Unicast-Antworten ein kurzes Fenster lang, schickt sie durch die Regeln und gibt sie per Unicast von Port 5353
+  an den Fragenden zurück.
+- Die Tests laufen in Linux-Netzwerk-Namespaces: ein Router-Namespace mit dem Daemon zwischen zwei veth-Blättern,
+  echtes Multicast auf beiden Adressfamilien, Regeln über `discoctl`, der Legacy-Proxy Ende-zu-Ende.
+
 ## Stand
 
 Die Recherche vom 10. Oktober 2026 (Überblick über avahi und die vorhandenen Reflectoren, Entwurf, Bewertung von
@@ -65,8 +245,7 @@ Rust, Aufwandsschätzung, Protokoll der Entscheidungen) steht in
 [mdns-router-research.md](mdns-router-research.md). Die Entscheidungen sind in
 [roadmap-items/discowall/decisions.md](roadmap-items/discowall/decisions.md), die Aufgaben einzeln in
 [roadmap-readmes/discowall.md](roadmap-readmes/discowall.md), die offenen Fragen in
-[roadmap-items/discowall/overview.md](roadmap-items/discowall/overview.md). Geschätzt sind 20 bis 30
-Personentage für die erste Version.
+[roadmap-items/discowall/overview.md](roadmap-items/discowall/overview.md).
 
 ## Roadmap
 
@@ -77,7 +256,7 @@ Personentage für die erste Version.
 - 🕵️ **P2:** `discoctl watch`, `hosts`, `services`, `stats`, `status`; Zähler pro Regel, `log`
 - 🕵️ **P3:** Stellvertreter für einmalige Anfragen und das QU-Bit, Link-local-AAAA entfernen, IPv6 durchgehend,
   Deduplizierung, Fuzzing, Härtung der Unit
-- 🏗️ **P4:** Pakete (Tarball, deb, rpm, OpenWrt), Cross-Builds, Release-Workflow, README und Manpages
+- 🕵️ **P4:** Pakete (Tarball, deb, rpm, OpenWrt), Cross-Builds, Release-Workflow, README und Manpages
 - 💤 nftables-Sets mit den Adressen erlaubter Hosts
 - 💤 SSDP (UPnP) als zweites Protokoll
 - 💤 FreeBSD-Backend und pfSense-Paket

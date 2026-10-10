@@ -6,9 +6,50 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 
+description = "discovery firewall: forwards mDNS between a router's interfaces under rules"
+
+[package.metadata.deb]
+name = "discowall"
+maintainer = "Sebastian Raff <hobbyquaker@gmail.com>"
+extended-description = """discowall forwards mDNS (Bonjour, Zeroconf) packets between a router's network \
+interfaces, as avahi's reflector does, but under rules: which hosts and services from which \
+network are visible in which other network. discoctl lists and edits the rules, watches the \
+traffic and shows the learned host table."""
+section = "net"
+priority = "optional"
+depends = ""
+conf-files = ["/etc/discowall/discowall.toml", "/etc/discowall/rules.toml"]
+assets = [
+    ["target/release/discowalld", "usr/bin/", "755"],
+    ["target/release/discoctl", "usr/bin/", "755"],
+    ["../../contrib/discowall.toml", "etc/discowall/discowall.toml", "644"],
+    ["../../contrib/rules.toml", "etc/discowall/rules.toml", "644"],
+    ["../../contrib/discowalld.service", "lib/systemd/system/discowalld.service", "644"],
+    ["../../README.md", "usr/share/doc/discowall/README.md", "644"],
+    ["../../target/man/discowalld.1", "usr/share/man/man1/", "644"],
+    ["../../target/man/discoctl.1", "usr/share/man/man1/", "644"],
+    ["../../target/man/discoctl-rule.1", "usr/share/man/man1/", "644"],
+]
+
+[package.metadata.generate-rpm]
+name = "discowall"
+summary = "discovery firewall: forwards mDNS between a router's interfaces under rules"
+license = "MIT"
+assets = [
+    { source = "target/release/discowalld", dest = "/usr/bin/discowalld", mode = "755" },
+    { source = "target/release/discoctl", dest = "/usr/bin/discoctl", mode = "755" },
+    { source = "../../contrib/discowall.toml", dest = "/etc/discowall/discowall.toml", mode = "644", config = true },
+    { source = "../../contrib/rules.toml", dest = "/etc/discowall/rules.toml", mode = "644", config = true },
+    { source = "../../contrib/discowalld.service", dest = "/usr/lib/systemd/system/discowalld.service", mode = "644" },
+    { source = "../../README.md", dest = "/usr/share/doc/discowall/README.md", mode = "644", doc = true },
+    { source = "../../target/man/discowalld.1", dest = "/usr/share/man/man1/discowalld.1", mode = "644", doc = true },
+    { source = "../../target/man/discoctl.1", dest = "/usr/share/man/man1/discoctl.1", mode = "644", doc = true },
+]
+
 [dependencies]
 anyhow = "1.0.104"
 clap = { version = "4.6.7", features = ["derive", "env"] }
+clap_mangen = "0.3.3"
 discowall-proto = { version = "0.1.0", path = "../discowall-proto" }
 futures-util = "0.3.34"
 hickory-proto = { version = "0.26.3", default-features = false, features = ["mdns"] }
