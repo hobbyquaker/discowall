@@ -21,8 +21,7 @@ The newest five dated entries; older ones move to `handoff-archive/<date>.md`.
   hickory-proto, `hosts.rs` host table and bundles, `rules.rs` chain/globs/prefixes, `reflector.rs` the core and the
   control handling, `control.rs` unix socket, `tests/netns.rs` + `tests/mdns_probe.py`), `crates/discoctl`,
   `contrib/` (config example, rules example, systemd unit).
-- **State of the items:** 2 (P0) and 3 (P1) are 🕵️ — green locally, first CI run on GitHub pending, never on a real
-  router. 4 (P2: `watch`, `services`, `stats`, `status` details, per-rule log), 5 (P3: legacy one-shot queries and the
+- **State of the items:** 2 (P0) and 3 (P1) are 🕵️ — green locally and in CI, never on a real router. 4 (P2: `watch`, `services`, `stats`, `status` details, per-rule log), 5 (P3: legacy one-shot queries and the
   QU bit, fe80 stripping, IPv6 end to end, dedup against a second reflector, fuzzing, unit hardening), 6 (P4:
   packaging, cross builds, release workflow, docs) and 10 (lab: avahi coexistence on 5353) are ☑️; 7, 8, 9 are 💤.
 - **Open for the maintainer:** OQ-10 the default policy of a fresh install (the code assumes `drop`); OQ-11 which
@@ -38,8 +37,9 @@ The newest five dated entries; older ones move to `handoff-archive/<date>.md`.
 ## 2026-10-10 (evening) — pushed to GitHub
 
 - The maintainer had the repository created and pushed: `github.com/hobbyquaker/discowall`, public, `master`, six
-  commits (research and scaffold, README, P0, P1). First CI run: see the Actions tab; its result is not yet recorded
-  here — the next session checks it and sets tasks 2 and 3 to ✅ or files what it found.
+  commits (research and scaffold, README, P0, P1). **First CI run green** (run 38060324264: fmt, clippy, build, tests
+  including the namespace test on the ubuntu runner, release build). Tasks 2 and 3 stay 🕵️ until a real router has
+  seen them; after that they are ✅.
 - Session ends here; everything above in *Cold start* is current.
 
 ## 2026-10-10 (later) — P0 built: the plain reflector works in network namespaces
