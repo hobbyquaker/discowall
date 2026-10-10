@@ -50,7 +50,7 @@ assets = [
 anyhow = "1.0.104"
 clap = { version = "4.6.7", features = ["derive", "env"] }
 clap_mangen = "0.3.3"
-discowall-proto = { version = "0.1.0", path = "../discowall-proto" }
+discowall-proto = { version = "0.0.1", path = "../discowall-proto" }
 futures-util = "0.3.34"
 hickory-proto = { version = "0.26.3", default-features = false, features = ["mdns"] }
 libc = "0.2.190"
