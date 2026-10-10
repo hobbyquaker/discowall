@@ -2,6 +2,9 @@
 
 The newest five dated entries; older ones move to `handoff-archive/<date>.md`.
 
+**Paused 2026-10-10 after the release of v0.0.1** (maintainer: "wir machen hier erstmal pause"). Everything is
+committed and pushed; the working tree is clean; the next session starts from *Cold start* below.
+
 ## Cold start (read this first)
 
 - **What it is:** a discovery firewall in Rust — `discowalld` forwards mDNS between a router's interfaces under a
@@ -9,9 +12,10 @@ The newest five dated entries; older ones move to `handoff-archive/<date>.md`.
   [decisions.md](decisions.md) (D-1…D-9), the index [roadmap-readmes/discowall.md](../../roadmap-readmes/discowall.md)
   and the item you were given. The research with the design is [mdns-router-research.md](../../mdns-router-research.md)
   (sections 3 design, 6 phases, 9 the Q&A record).
-- **Where:** GitHub `hobbyquaker/discowall` (public, branch `master`, pushed 2026-10-10 with Fable's commits up to
-  P1), local working copy `~/repos/mdns-router` until the maintainer renames it to `~/repos/discowall`. Agents commit
-  locally with named paths; **push only on the maintainer's word** (D-9) — the first push was his.
+- **Where:** GitHub `hobbyquaker/discowall` (public, branch `master`, release `v0.0.1` of 2026-10-10), local
+  working copy `~/repos/discowall` (renamed from `mdns-router` by the maintainer when the session of 2026-10-10
+  ended; if a memory or a note still says `mdns-router`, that is why). Agents commit locally with named paths;
+  **push, tags and releases only on the maintainer's word** (D-9).
 - **Toolchain:** Rust stable via rustup on the WSL machine; `export PATH=$HOME/.cargo/bin:$PATH` in non-login shells.
   Gate: `cargo fmt --all --check`, `cargo clippy --all-targets -- -D warnings`, `cargo build --all`, `cargo test --all`
   (the last builds `discoctl` for the namespace test). The namespace test needs `unshare -rn`, `ip`, `nsenter`,
@@ -21,13 +25,15 @@ The newest five dated entries; older ones move to `handoff-archive/<date>.md`.
   hickory-proto, `hosts.rs` host table and bundles, `rules.rs` chain/globs/prefixes, `reflector.rs` the core and the
   control handling, `control.rs` unix socket, `tests/netns.rs` + `tests/mdns_probe.py`), `crates/discoctl`,
   `contrib/` (config example, rules example, systemd unit).
-- **State of the items:** 2–6 (P0–P4, the whole v1) are 🕵️ — green locally and in CI, never on a real router,
-  8 (SSDP) is 🕵️ as well; the release workflow is proven by v0.0.1. 10 (lab: avahi coexistence) is ☑️ and needs
+- **State of the items:** 2–6 (P0–P4, the whole v1) and 8 (SSDP) are 🕵️ — green locally and in CI, released as
+  v0.0.1, never on a real router; the release workflow is proven. 10 (lab: avahi coexistence) is ☑️ and needs
   the lab, 11 (Proxmox lab) 🤷, 12 (avahi in the namespace test) ☑️; 7, 9 are 💤.
 - **Open for the maintainer:** OQ-10 the default policy of a fresh install (the code assumes `drop`); OQ-11 which
-  router and VLANs are the lab for task 10 and for packet captures as parser fixtures (nothing lab-specific goes
-  into the repository). The directory rename. A try of P0/P1 on a router: `discowalld --config`, `discoctl status`,
-  a browse from one side, `discoctl hosts`.
+  router and VLANs are the lab; task 11's questions (fresh or real VLAN tags for the Proxmox lab, SSH for
+  sessions to `pct` and the containers, an OpenWrt VM later). A try of v0.0.1 on a router: install the `.deb`,
+  `discoctl status`, rules, a browse from one side, `discoctl watch` — then tasks 2–6 and 8 → ✅.
+- **Where to continue without the maintainer:** task 12 (avahi inside the namespace test, ☑️); then nothing
+  until the lab exists — tasks 7 (nftables sets) and 9 (FreeBSD) are 💤 by decision, not by readiness.
 - **Known gaps worth knowing before the next item:** `records_dropped` and `dropped_link_local` count per target
   interface, not per packet; the proxy opens one ephemeral socket per legacy query (fine for `dig`, a flood would
   need a cap); `cargo test -p discowalld` does not rebuild `discoctl` for the namespace test (`cargo build --all`
@@ -91,21 +97,3 @@ The newest five dated entries; older ones move to `handoff-archive/<date>.md`.
 - Next: the maintainer creates the GitHub remote and pushes (CI), tries P0 on a router; the P1 lane continues with
   the host table (research 3.5).
 
-## 2026-10-10 — research, Q&A, decisions D-1…D-9, phase items filed; no code
-
-- The maintainer's ask (verbatim in the research): a tool on a Linux router that forwards mDNS between interfaces like
-  avahi's reflector, with rules (which hosts to which interface, whitelist/blacklist, src/target based, a simple form
-  of iptables), a CLI to list and set rules and to see which announcements arrive on which interface, scriptable;
-  Rust; what do I think, effort, feasibility.
-- Written: [mdns-router-research.md](../../mdns-router-research.md) (verdict: feasible, Rust fits, 20–30 person-days
-  for v1, 8–11 for an MVP; section 9 is the Q&A record), this working-model scaffold (AGENTS.md, overview with
-  OQ-1…OQ-11, decisions D-1…D-9, the roadmap script copied from openccu-lite-agents, 44 tests green).
-- **Q&A outcome:** Rust (D-1); the name **discowall**, `discowalld`/`discoctl`, MIT, GitHub `hobbyquaker/discowall`
-  (D-2); scope stays the forwarder, SSDP later, avahi coexistence required (D-3); Linux first across Debian/Ubuntu/
-  Armbian/Arch/Fedora/OpenWrt, FreeBSD/pfSense later behind a socket trait (D-4); iptables-like CLI over TOML (D-5);
-  legacy-query proxy in v1 (D-6); no MAC rules (D-7); nftables feed later (D-8); agent docs public here (D-9).
-- **Items:** task 1 (the concept discussion) ✅; tasks 2–6 = v1 phases P0–P4 ☑️; task 10 the avahi-coexistence lab
-  check ☑️ (needs the maintainer's lab, OQ-11); tasks 7 (nftables feed), 8 (SSDP), 9 (FreeBSD/pfSense) 💤.
-- **Not done, the maintainer's:** rename `~/repos/mdns-router` to `~/repos/discowall` (the VS Code workspace points
-  at the old name), create the GitHub remote, answer OQ-10 and OQ-11. Then task 2 can start: `rustup` on the WSL
-  machine, the Cargo project, the plain reflector with netns tests.
