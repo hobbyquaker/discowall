@@ -7,8 +7,9 @@ with control, beside avahi, never instead of it. The survey, the design, the Rus
 the Q&A record are in [../../mdns-router-research.md](../../mdns-router-research.md) (Fable, 2026-10-10). Decisions
 D-1…D-9 in [decisions.md](decisions.md).
 
-- **Code:** `~/repos/mdns-router` until the maintainer renames the directory to `discowall`; branch `master`; MIT;
-  GitHub `hobbyquaker/discowall` (D-2). **No code yet, no remote yet**, no Rust toolchain on the WSL machine yet.
+- **Code:** [github.com/hobbyquaker/discowall](https://github.com/hobbyquaker/discowall) (public, `master`, MIT, pushed
+  2026-10-10); local `~/repos/mdns-router` until the maintainer renames the directory to `discowall`. P0 and P1 are
+  built (tasks 2, 3); Rust stable via rustup on the WSL machine.
 - **Runtime:** Rust (D-1). **Shape:** `discowalld` owns the 5353 sockets, parses every packet, applies the rule chain
   per (in-interface, out-interface) and re-sends; `discoctl` talks to it over a unix socket (rules, live watch, host
   table, statistics, every command with `--json`).

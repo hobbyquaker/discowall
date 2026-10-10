@@ -2,6 +2,46 @@
 
 The newest five dated entries; older ones move to `handoff-archive/<date>.md`.
 
+## Cold start (read this first)
+
+- **What it is:** a discovery firewall in Rust — `discowalld` forwards mDNS between a router's interfaces under a
+  rule chain, `discoctl` is its CLI. Read `AGENTS.md`, then [overview.md](overview.md) (what and why, OQ-n),
+  [decisions.md](decisions.md) (D-1…D-9), the index [roadmap-readmes/discowall.md](../../roadmap-readmes/discowall.md)
+  and the item you were given. The research with the design is [mdns-router-research.md](../../mdns-router-research.md)
+  (sections 3 design, 6 phases, 9 the Q&A record).
+- **Where:** GitHub `hobbyquaker/discowall` (public, branch `master`, pushed 2026-10-10 with Fable's commits up to
+  P1), local working copy `~/repos/mdns-router` until the maintainer renames it to `~/repos/discowall`. Agents commit
+  locally with named paths; **push only on the maintainer's word** (D-9) — the first push was his.
+- **Toolchain:** Rust stable via rustup on the WSL machine; `export PATH=$HOME/.cargo/bin:$PATH` in non-login shells.
+  Gate: `cargo fmt --all --check`, `cargo clippy --all-targets -- -D warnings`, `cargo build --all`, `cargo test --all`
+  (the last builds `discoctl` for the namespace test). The namespace test needs `unshare -rn`, `ip`, `nsenter`,
+  `python3`; it skips with a message where it cannot run. CI (`.github/workflows/ci.yml`) runs the same.
+- **Layout:** `crates/discowall-proto` (JSON-lines control protocol, `RuleSpec`, views), `crates/discowalld`
+  (`config.rs`, `socket.rs` trait + Linux backend, `ifaces.rs` rtnetlink, `packet.rs` parser/classification on
+  hickory-proto, `hosts.rs` host table and bundles, `rules.rs` chain/globs/prefixes, `reflector.rs` the core and the
+  control handling, `control.rs` unix socket, `tests/netns.rs` + `tests/mdns_probe.py`), `crates/discoctl`,
+  `contrib/` (config example, rules example, systemd unit).
+- **State of the items:** 2 (P0) and 3 (P1) are 🕵️ — green locally, first CI run on GitHub pending, never on a real
+  router. 4 (P2: `watch`, `services`, `stats`, `status` details, per-rule log), 5 (P3: legacy one-shot queries and the
+  QU bit, fe80 stripping, IPv6 end to end, dedup against a second reflector, fuzzing, unit hardening), 6 (P4:
+  packaging, cross builds, release workflow, docs) and 10 (lab: avahi coexistence on 5353) are ☑️; 7, 8, 9 are 💤.
+- **Open for the maintainer:** OQ-10 the default policy of a fresh install (the code assumes `drop`); OQ-11 which
+  router and VLANs are the lab for task 10 and for packet captures as parser fixtures (nothing lab-specific goes
+  into the repository). The directory rename. A try of P0/P1 on a router: `discowalld --config`, `discoctl status`,
+  a browse from one side, `discoctl hosts`.
+- **Known gaps worth knowing before the next item:** the QU bit is forwarded unchanged (P3 clears it); a query from
+  an ephemeral port is forwarded like any other and its unicast answer never comes back (P3 proxies it); fe80 AAAA
+  records cross (P3 strips them); IPv6 is implemented but only the v4 path is covered by the namespace test;
+  `records_dropped` counts per target interface, not per packet; the README's Roadmap list is hand-maintained in both
+  languages and must be updated with every `roadmap.py state`.
+
+## 2026-10-10 (evening) — pushed to GitHub
+
+- The maintainer had the repository created and pushed: `github.com/hobbyquaker/discowall`, public, `master`, six
+  commits (research and scaffold, README, P0, P1). First CI run: see the Actions tab; its result is not yet recorded
+  here — the next session checks it and sets tasks 2 and 3 to ✅ or files what it found.
+- Session ends here; everything above in *Cold start* is current.
+
 ## 2026-10-10 (later) — P0 built: the plain reflector works in network namespaces
 
 - Task 2 is 🕵️: workspace with `discowalld`, `discoctl` and the protocol crate; sockets behind the `MdnsSocket`

@@ -7,7 +7,9 @@ avahi-daemon's reflector does — but under rules: which hosts and services may 
 whitelist or blacklist, source- and target-based, a little like iptables for `.local`. A daemon plus a CLI that
 is good for scripts. Rust (D-1). The concept and the research are in
 [mdns-router-research.md](mdns-router-research.md) (2026-10-10, its section 9 holds the Q&A outcome); the decisions
-D-1…D-9 are in `roadmap-items/discowall/decisions.md`. Daemon `discowalld`, CLI `discoctl`. No code yet.
+D-1…D-9 are in `roadmap-items/discowall/decisions.md`. Daemon `discowalld`, CLI `discoctl`. Code on
+[github.com/hobbyquaker/discowall](https://github.com/hobbyquaker/discowall); the cold-start section of
+`roadmap-items/discowall/HANDOFF.md` says where everything is.
 
 **This repository holds both the code (later) and the agent working documents**, in the same shape as the
 maintainer's agents repositories (`~/repos/openccu-lite-agents`, `~/repos/she-agent`): the index in

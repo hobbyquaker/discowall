@@ -2,10 +2,11 @@
 
 [:uk: English README](README.en.md)
 
+[![CI](https://github.com/hobbyquaker/discowall/actions/workflows/ci.yml/badge.svg)](https://github.com/hobbyquaker/discowall/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 > [!CAUTION]
-> discowall ist in Planung. Es gibt noch keinen Code, nur die Recherche, die Entscheidungen und die Roadmap.
+> discowall ist in Entwicklung. Der Reflector mit Regelkette und CLI steht (P0, P1), ist aber noch auf keinem echten Router gelaufen.
 
 discowall ist eine **Discovery-Firewall** für einen Linux-Router: Es leitet mDNS-Pakete (Bonjour, Zeroconf,
 RFC 6762) von einer Netzwerkschnittstelle auf andere weiter, so wie es der Reflector von avahi-daemon tut, aber
