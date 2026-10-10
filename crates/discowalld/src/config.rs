@@ -16,6 +16,10 @@ pub struct Config {
     pub ipv6: bool,
     #[serde(default = "default_socket")]
     pub control_socket: PathBuf,
+    /// The rules file (`discoctl save` writes it, `discoctl apply` reloads it). Missing: an empty
+    /// chain with the default policy `drop`.
+    #[serde(default = "default_rules")]
+    pub rules_file: PathBuf,
     /// A packet identical to one seen within this window is dropped (a second reflector, a bridge
     /// that delivers twice). mDNS repeats announcements no faster than once per second.
     #[serde(default = "default_dedup")]
@@ -27,6 +31,9 @@ fn yes() -> bool {
 }
 fn default_socket() -> PathBuf {
     PathBuf::from(discowall_proto::DEFAULT_SOCKET)
+}
+fn default_rules() -> PathBuf {
+    PathBuf::from("/etc/discowall/rules.toml")
 }
 fn default_dedup() -> u64 {
     500

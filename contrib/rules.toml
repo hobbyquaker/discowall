@@ -1,0 +1,34 @@
+# /etc/discowall/rules.toml — the rule chain. First match wins; `default` decides the rest.
+# `discoctl rule list` shows the chain with hit counters, `discoctl rule add …` edits it,
+# `discoctl save` writes this file, `discoctl apply` (or SIGHUP) reloads it.
+#
+# Fields (every one optional, a list is any-of): in, out (interface names), src (addresses or
+# prefixes), kind (query, probe, response, announce), service (globs, `_hap._tcp`), instance
+# (globs, without the service tail), host (globs, without `.local`), rrtype (A, AAAA, PTR, SRV,
+# TXT, …), action (accept, drop), log (true logs every hit), comment.
+
+default = "drop"
+
+# The LAN may look for HomeKit accessories in the IoT network …
+[[rule]]
+in = "lan"
+out = "iot"
+kind = ["query"]
+service = ["_hap._tcp"]
+action = "accept"
+
+# … and only the bridge answers back. Its PTR, SRV, TXT and A records count as one bundle.
+[[rule]]
+in = "iot"
+out = "lan"
+kind = ["response", "announce"]
+host = ["bridge"]
+action = "accept"
+log = true
+
+# Printers in the IoT network are visible everywhere; nothing else of theirs is.
+[[rule]]
+in = "iot"
+kind = ["response", "announce"]
+service = ["_ipp._tcp", "_ipps._tcp", "_printer._tcp", "_pdl-datastream._tcp"]
+action = "accept"

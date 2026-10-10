@@ -10,8 +10,9 @@ The newest five dated entries; older ones move to `handoff-archive/<date>.md`.
   Gate green locally; `.github/workflows/ci.yml` written, never run (no remote).
 - **Rust 1.99 is installed** via rustup (`~/.cargo/bin`, not on PATH in non-login shells: `export PATH=$HOME/.cargo/bin:$PATH`).
 - **Assumed, not decided:** OQ-10 default policy `drop` (not used before P1). Nothing else was decided.
-- **Task 3 (P1) is 🏗️:** the parser module `packet.rs` is in (hickory-proto, classification, name helpers, 7 tests);
-  host table, rule chain, rebuild and the rule commands are next. 17 tests green, clippy clean.
+- **Task 3 (P1) is 🕵️:** parser, host table with bundles, rule chain, packet rebuild, rules file with save/apply,
+  `discoctl rule …`/`hosts`/`save`/`apply`, the netns test drives the chain through discoctl and proves the
+  HomeKit scenario (camera dropped, bridge forwarded). 31 tests green, clippy clean. Details in the item.
 - Next: the maintainer creates the GitHub remote and pushes (CI), tries P0 on a router; the P1 lane continues with
   the host table (research 3.5).
 

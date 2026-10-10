@@ -17,6 +17,8 @@ jobs:
       - run: cargo clippy --all-targets -- -D warnings
       # The namespace test needs user namespaces, ip, nsenter and python3; the ubuntu runner has
       # them all. It skips itself, with a message, where it cannot run.
+      # The namespace test runs discoctl from target/debug: build every binary first.
+      - run: cargo build --all
       - run: cargo test --all
       - run: cargo build --release
       - run: ls -l target/release/discowalld target/release/discoctl

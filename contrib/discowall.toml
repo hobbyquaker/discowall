@@ -10,6 +10,10 @@ interfaces = ["lan", "iot"]
 # Where discoctl talks to the daemon.
 #control_socket = "/run/discowall/control.sock"
 
+# The rules (see rules.toml); `discoctl save` writes it, `discoctl apply` or SIGHUP reloads it.
+# Missing: nothing crosses (default policy drop, no rules).
+#rules_file = "/etc/discowall/rules.toml"
+
 # A packet identical to one seen within this window is dropped (a second reflector, a bridge that
 # delivers twice). mDNS repeats announcements no faster than once per second.
 #dedup_window_ms = 500

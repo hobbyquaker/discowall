@@ -2,12 +2,14 @@
 
 mod config;
 mod control;
+#[allow(dead_code)]
+mod hosts;
 mod ifaces;
-// The classification API is the rule chain's (P1, in progress); until it lands, only the
-// summary is used.
 #[allow(dead_code)]
 mod packet;
 mod reflector;
+#[allow(dead_code)]
+mod rules;
 mod socket;
 
 use anyhow::{Context, Result};
@@ -102,15 +104,17 @@ async fn run(config: Config, config_path: String) -> Result<()> {
     });
     tokio::spawn(control::serve(listener, query_tx));
 
-    let mut core = reflector::Reflector::new(&config, config_path, sockets);
+    let mut core = reflector::Reflector::new(&config, config_path, sockets)?;
     let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+    let mut sighup = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup())?;
+    let mut tick = tokio::time::interval(std::time::Duration::from_secs(5));
     loop {
         tokio::select! {
             Some(pkt) = packet_rx.recv() => { core.on_packet(pkt); }
             Some(ev) = iface_rx.recv() => core.on_iface_event(ev),
-            Some(q) = query_rx.recv() => match q {
-                CoreQuery::Status(reply) => { reply.send(core.status()).ok(); }
-            },
+            Some(CoreQuery { request, reply }) = query_rx.recv() => { reply.send(core.handle(request)).ok(); }
+            _ = tick.tick() => core.tick(),
+            _ = sighup.recv() => core.reload_rules(),
             _ = tokio::signal::ctrl_c() => break,
             _ = sigterm.recv() => break,
         }
