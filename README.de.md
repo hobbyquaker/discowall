@@ -275,6 +275,8 @@ Rust, Aufwandsschätzung, Protokoll der Entscheidungen) steht in
 - 💤 nftables-Sets mit den Adressen erlaubter Hosts
 - 🕵️ SSDP (UPnP) als zweites Protokoll
 - 💤 FreeBSD-Backend und pfSense-Paket
+- 🤷 Proxmox-Lab für End-to-End-Tests (drei LXC an einer VLAN-fähigen Bridge, lab.py)
+- ☑️ avahi im Namespace-Test auf GitHub
 - ✅ Konzept: Regelmodell, CLI, Laufzeit mit dem Maintainer besprochen
 
 🏗️ in Arbeit · 🕵️ gebaut, in Prüfung · ☑️ bereit zur Umsetzung · 🤷 noch zu klären · 💤 später · ✅ erledigt
