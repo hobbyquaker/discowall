@@ -7,6 +7,7 @@ mod hosts;
 mod ifaces;
 #[allow(dead_code)]
 mod packet;
+mod proxy;
 mod reflector;
 #[allow(dead_code)]
 mod rules;
@@ -16,7 +17,7 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use config::Config;
 use control::CoreQuery;
-use socket::{Family, MdnsSocket};
+use socket::{Family, MdnsSocket, SocketFactory};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -102,7 +103,16 @@ async fn run(config: Config, config_path: String) -> Result<()> {
             error!("interface watcher ended: {e:#}");
         }
     });
-    let mut core = reflector::Reflector::new(&config, config_path, sockets)?;
+    let factory: SocketFactory = Arc::new(|family, ephemeral| {
+        let s = if ephemeral {
+            socket::linux::LinuxSocket::open_ephemeral(family)?
+        } else {
+            socket::linux::LinuxSocket::open(family)?
+        };
+        Ok(Arc::new(s) as Arc<dyn MdnsSocket>)
+    });
+    let mut core =
+        reflector::Reflector::new(&config, config_path, sockets, factory, packet_tx.clone())?;
     tokio::spawn(control::serve(listener, query_tx, core.events.clone()));
     let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
     let mut sighup = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup())?;

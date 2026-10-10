@@ -1,4 +1,4 @@
-## 6. P4: packaging (tarball, deb, rpm, OpenWrt), cross builds, release workflow, README and man pages ☑️
+## 6. P4: packaging (tarball, deb, rpm, OpenWrt), cross builds, release workflow, README and man pages 🏗️
 
 **Created** 2026-10-10.
 

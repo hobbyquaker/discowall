@@ -26,6 +26,22 @@ pub struct Received {
     pub data: Vec<u8>,
     pub src: SocketAddr,
     pub ifindex: u32,
+    /// Set on an answer the legacy-query proxy collected: the one-shot querier it is for and the
+    /// interface it sits on.
+    pub reply_to: Option<ReplyTo>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReplyTo {
+    pub addr: SocketAddr,
+    pub ifindex: u32,
+}
+
+pub fn group_addr(family: Family) -> SocketAddr {
+    match family {
+        Family::V4 => SocketAddr::new(IpAddr::V4(MDNS_V4), MDNS_PORT),
+        Family::V6 => SocketAddr::new(IpAddr::V6(MDNS_V6), MDNS_PORT),
+    }
 }
 
 /// One mDNS socket of one address family.
@@ -35,9 +51,17 @@ pub trait MdnsSocket: Send + Sync {
     fn recv(&self) -> Result<Received>;
     /// Sends `data` to the mDNS group on the interface `ifindex`.
     fn send_multicast(&self, data: &[u8], ifindex: u32) -> Result<()>;
+    /// Sends `data` to one host on the interface `ifindex` (a legacy response, RFC 6762 §6.7).
+    fn send_unicast(&self, data: &[u8], dst: SocketAddr, ifindex: u32) -> Result<()>;
     fn join(&self, ifindex: u32) -> Result<()>;
     fn leave(&self, ifindex: u32) -> Result<()>;
+    /// `recv` returns an error after this long without a packet (`None`: blocks forever).
+    fn set_read_timeout(&self, timeout: Option<std::time::Duration>) -> Result<()>;
 }
+
+/// Opens sockets: the two long-lived ones at start, an ephemeral one per proxied legacy query.
+pub type SocketFactory =
+    std::sync::Arc<dyn Fn(Family, bool) -> Result<std::sync::Arc<dyn MdnsSocket>> + Send + Sync>;
 
 #[cfg(target_os = "linux")]
 pub mod linux {
@@ -79,7 +103,18 @@ pub mod linux {
     }
 
     impl LinuxSocket {
+        /// The long-lived socket on port 5353.
         pub fn open(family: Family) -> Result<Self> {
+            Self::open_on(family, MDNS_PORT)
+        }
+
+        /// A short-lived socket on an ephemeral port: the proxy asks from it on a one-shot querier's
+        /// behalf, and responders answer it by unicast (they treat it as a legacy querier).
+        pub fn open_ephemeral(family: Family) -> Result<Self> {
+            Self::open_on(family, 0)
+        }
+
+        fn open_on(family: Family, port: u16) -> Result<Self> {
             let domain = match family {
                 Family::V4 => Domain::IPV4,
                 Family::V6 => Domain::IPV6,
@@ -96,10 +131,8 @@ pub mod linux {
                     sock.set_multicast_loop_v4(false)
                         .context("IP_MULTICAST_LOOP")?;
                     sock.set_multicast_ttl_v4(255).context("IP_MULTICAST_TTL")?;
-                    sock.bind(
-                        &SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), MDNS_PORT).into(),
-                    )
-                    .context("bind 0.0.0.0:5353")?;
+                    sock.bind(&SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port).into())
+                        .with_context(|| format!("bind 0.0.0.0:{port}"))?;
                 }
                 Family::V6 => {
                     sock.set_only_v6(true).context("IPV6_V6ONLY")?;
@@ -110,13 +143,58 @@ pub mod linux {
                         .context("IPV6_MULTICAST_LOOP")?;
                     sock.set_multicast_hops_v6(255)
                         .context("IPV6_MULTICAST_HOPS")?;
-                    sock.bind(
-                        &SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), MDNS_PORT).into(),
-                    )
-                    .context("bind [::]:5353")?;
+                    sock.bind(&SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port).into())
+                        .with_context(|| format!("bind [::]:{port}"))?;
                 }
             }
             Ok(Self { family, sock })
+        }
+    }
+
+    impl LinuxSocket {
+        /// One send with the egress interface chosen through the pktinfo control message.
+        fn send_to(&self, data: &[u8], dst: SocketAddr, ifindex: u32) -> Result<()> {
+            let iov = [IoSlice::new(data)];
+            let fd = self.sock.as_raw_fd();
+            match (self.family, dst) {
+                (Family::V4, SocketAddr::V4(dst)) => {
+                    let pi = libc::in_pktinfo {
+                        ipi_ifindex: ifindex as i32,
+                        ipi_spec_dst: libc::in_addr { s_addr: 0 },
+                        ipi_addr: libc::in_addr { s_addr: 0 },
+                    };
+                    let addr = SockaddrIn::from(dst);
+                    sendmsg(
+                        fd,
+                        &iov,
+                        &[ControlMessage::Ipv4PacketInfo(&pi)],
+                        MsgFlags::empty(),
+                        Some(&addr),
+                    )
+                    .context("sendmsg v4")?;
+                }
+                (Family::V6, SocketAddr::V6(dst)) => {
+                    let pi = libc::in6_pktinfo {
+                        ipi6_addr: libc::in6_addr { s6_addr: [0; 16] },
+                        ipi6_ifindex: ifindex,
+                    };
+                    let mut dst = dst;
+                    if dst.ip().is_multicast() || dst.ip().segments()[0] & 0xffc0 == 0xfe80 {
+                        dst.set_scope_id(ifindex);
+                    }
+                    let addr = SockaddrIn6::from(dst);
+                    sendmsg(
+                        fd,
+                        &iov,
+                        &[ControlMessage::Ipv6PacketInfo(&pi)],
+                        MsgFlags::empty(),
+                        Some(&addr),
+                    )
+                    .context("sendmsg v6")?;
+                }
+                _ => anyhow::bail!("address family mismatch"),
+            }
+            Ok(())
         }
     }
 
@@ -164,48 +242,20 @@ pub mod linux {
                 data: buf,
                 src,
                 ifindex,
+                reply_to: None,
             })
         }
 
         fn send_multicast(&self, data: &[u8], ifindex: u32) -> Result<()> {
-            let iov = [IoSlice::new(data)];
-            let fd = self.sock.as_raw_fd();
-            match self.family {
-                Family::V4 => {
-                    let pi = libc::in_pktinfo {
-                        ipi_ifindex: ifindex as i32,
-                        ipi_spec_dst: libc::in_addr { s_addr: 0 },
-                        ipi_addr: libc::in_addr { s_addr: 0 },
-                    };
-                    let addr = SockaddrIn::from(std::net::SocketAddrV4::new(MDNS_V4, MDNS_PORT));
-                    sendmsg(
-                        fd,
-                        &iov,
-                        &[ControlMessage::Ipv4PacketInfo(&pi)],
-                        MsgFlags::empty(),
-                        Some(&addr),
-                    )
-                    .context("sendmsg v4")?;
-                }
-                Family::V6 => {
-                    let pi = libc::in6_pktinfo {
-                        ipi6_addr: libc::in6_addr { s6_addr: [0; 16] },
-                        ipi6_ifindex: ifindex,
-                    };
-                    let addr = SockaddrIn6::from(std::net::SocketAddrV6::new(
-                        MDNS_V6, MDNS_PORT, 0, ifindex,
-                    ));
-                    sendmsg(
-                        fd,
-                        &iov,
-                        &[ControlMessage::Ipv6PacketInfo(&pi)],
-                        MsgFlags::empty(),
-                        Some(&addr),
-                    )
-                    .context("sendmsg v6")?;
-                }
-            }
-            Ok(())
+            self.send_to(data, group_addr(self.family), ifindex)
+        }
+
+        fn send_unicast(&self, data: &[u8], dst: SocketAddr, ifindex: u32) -> Result<()> {
+            self.send_to(data, dst, ifindex)
+        }
+
+        fn set_read_timeout(&self, timeout: Option<std::time::Duration>) -> Result<()> {
+            self.sock.set_read_timeout(timeout).context("SO_RCVTIMEO")
         }
 
         fn join(&self, ifindex: u32) -> Result<()> {

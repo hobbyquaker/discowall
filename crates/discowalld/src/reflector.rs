@@ -5,8 +5,9 @@ use crate::config::Config;
 use crate::hosts::HostTable;
 use crate::ifaces::IfaceEvent;
 use crate::packet::{Kind, Packet, Section};
+use crate::proxy;
 use crate::rules::{self, Chain, Subject, Verdict};
-use crate::socket::{Family, MdnsSocket, Received};
+use crate::socket::{Family, MdnsSocket, Received, ReplyTo, SocketFactory};
 use anyhow::{Context, Result};
 use discowall_proto::{
     Action, Counters, InterfaceStats, InterfaceStatus, PacketKind, Request, Response, RuleSet,
@@ -21,6 +22,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
+use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
 #[derive(Debug, Default, Clone)]
@@ -54,6 +56,18 @@ pub struct Reflector {
     pub counters: Counters,
     /// `discoctl watch` subscribers; nobody listening is fine.
     pub events: broadcast::Sender<WatchEvent>,
+    factory: SocketFactory,
+    /// Where the proxy's collected answers come back in.
+    packet_tx: mpsc::Sender<Received>,
+    strip_link_local: bool,
+    legacy_window: Duration,
+}
+
+fn is_link_local(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(a) => a.is_link_local(),
+        IpAddr::V6(a) => a.segments()[0] & 0xffc0 == 0xfe80,
+    }
 }
 
 fn kind_of(k: Kind) -> PacketKind {
@@ -99,6 +113,8 @@ impl Reflector {
         config: &Config,
         config_path: String,
         sockets: Vec<Arc<dyn MdnsSocket>>,
+        factory: SocketFactory,
+        packet_tx: mpsc::Sender<Received>,
     ) -> Result<Self> {
         let ifaces = config
             .interfaces
@@ -126,6 +142,10 @@ impl Reflector {
             hosts: HostTable::default(),
             counters: Counters::default(),
             events: broadcast::channel(256).0,
+            factory,
+            packet_tx,
+            strip_link_local: config.strip_link_local,
+            legacy_window: Duration::from_millis(config.legacy_window_ms),
         })
     }
 
@@ -343,7 +363,17 @@ impl Reflector {
                 dropped += 1;
             }
         }
+        let mut link_local = 0usize;
         for r in &pkt.records {
+            if self.strip_link_local {
+                if let crate::packet::Data::Addr(ip) = r.data {
+                    if is_link_local(ip) {
+                        keep_r.push(false);
+                        link_local += 1;
+                        continue;
+                    }
+                }
+            }
             let mut names: Vec<&str> = vec![&r.name];
             match &r.data {
                 crate::packet::Data::Ptr(t) => names.push(t),
@@ -377,6 +407,14 @@ impl Reflector {
             );
         }
         self.counters.records_dropped += dropped as u64;
+        self.counters.dropped_link_local += link_local as u64;
+        // The QU bit asks for a unicast answer, which would go to this router instead of the
+        // querier once reflected: cleared (research 3.7).
+        let qu = pkt
+            .questions
+            .iter()
+            .zip(&keep_q)
+            .any(|(q, k)| *k && q.unicast);
         // A query with no question left, a response with no answer left: nothing to send.
         let alive = if pkt.is_query() {
             keep_q.iter().any(|k| *k)
@@ -388,7 +426,7 @@ impl Reflector {
         };
         let bytes = if !alive {
             None
-        } else if dropped == 0 {
+        } else if dropped == 0 && link_local == 0 && !qu {
             Some(original.to_vec())
         } else {
             Some(rebuild(&pkt.message, &keep_q, &keep_r))
@@ -468,6 +506,12 @@ impl Reflector {
         let Some(socket) = self.socket(pkt.family).cloned() else {
             return vec![];
         };
+        if let Some(reply_to) = pkt.reply_to {
+            return self.relay_answer(&pkt, &parsed, &in_name, reply_to, &socket);
+        }
+        if parsed.is_query() && pkt.src.port() != crate::socket::MDNS_PORT {
+            return self.proxy_query(&pkt, &parsed, &in_name);
+        }
         let targets: Vec<(String, Option<u32>)> = self
             .names
             .iter()
@@ -542,6 +586,171 @@ impl Reflector {
             decisions,
         );
         sent
+    }
+
+    /// An answer the proxy collected for a one-shot querier: through the rules (in: the answering
+    /// interface, out: the querier's), then by unicast to the querier from port 5353.
+    fn relay_answer(
+        &mut self,
+        pkt: &Received,
+        parsed: &Packet,
+        in_name: &str,
+        reply_to: ReplyTo,
+        socket: &Arc<dyn MdnsSocket>,
+    ) -> Vec<String> {
+        let Some(out_name) = self.index_to_name.get(&reply_to.ifindex).cloned() else {
+            self.counters.dropped_unknown_interface += 1;
+            return vec![];
+        };
+        let f = self.filter(parsed, &pkt.data, in_name, &out_name, pkt.src.ip());
+        let decision = match &f.bytes {
+            None => WatchDecision {
+                iface: out_name.clone(),
+                result: "dropped".into(),
+                dropped: f.dropped,
+                rules: f.rules.clone(),
+            },
+            Some(bytes) => match socket.send_unicast(bytes, reply_to.addr, reply_to.ifindex) {
+                Ok(()) => {
+                    self.counters.tx += 1;
+                    self.counters.proxied_answers += 1;
+                    self.ifaces.get_mut(&out_name).expect("configured").tx += 1;
+                    let result = if f.dropped == 0 {
+                        "relayed"
+                    } else {
+                        "relayed-partial"
+                    };
+                    WatchDecision {
+                        iface: out_name.clone(),
+                        result: result.into(),
+                        dropped: f.dropped,
+                        rules: f.rules.clone(),
+                    }
+                }
+                Err(e) => {
+                    self.counters.send_errors += 1;
+                    warn!(iface = %out_name, to = %reply_to.addr, "unicast relay failed: {e:#}");
+                    WatchDecision {
+                        iface: out_name.clone(),
+                        result: "error".into(),
+                        dropped: f.dropped,
+                        rules: f.rules.clone(),
+                    }
+                }
+            },
+        };
+        debug!(iface = %in_name, src = %pkt.src, to = %reply_to.addr, result = %decision.result, "legacy answer {}", parsed.summary());
+        let sent = if decision.result.starts_with("relayed") {
+            vec![out_name]
+        } else {
+            vec![]
+        };
+        self.emit(
+            in_name,
+            pkt,
+            format!("{}/legacy", parsed.kind),
+            Some(parsed),
+            vec![decision],
+        );
+        sent
+    }
+
+    /// A one-shot query from an ephemeral port: ask on the allowed target interfaces from an
+    /// ephemeral socket of our own; the answers come back through `relay_answer`.
+    fn proxy_query(&mut self, pkt: &Received, parsed: &Packet, in_name: &str) -> Vec<String> {
+        if self.legacy_window.is_zero() {
+            self.counters.dropped_by_rules += 1;
+            self.emit(
+                in_name,
+                pkt,
+                format!("{}/legacy", parsed.kind),
+                Some(parsed),
+                vec![],
+            );
+            return vec![];
+        }
+        let targets: Vec<(String, Option<u32>)> = self
+            .names
+            .iter()
+            .filter(|n| **n != in_name)
+            .map(|n| {
+                let i = &self.ifaces[n];
+                (
+                    n.clone(),
+                    (i.up && i.joined.contains(&pkt.family))
+                        .then(|| i.index.expect("up implies index")),
+                )
+            })
+            .collect();
+        let mut queries = Vec::new();
+        let mut decisions = Vec::new();
+        let mut asked = Vec::new();
+        for (name, index) in targets {
+            let Some(index) = index else {
+                decisions.push(WatchDecision {
+                    iface: name,
+                    result: "down".into(),
+                    dropped: 0,
+                    rules: vec![],
+                });
+                continue;
+            };
+            let f = self.filter(parsed, &pkt.data, in_name, &name, pkt.src.ip());
+            match f.bytes {
+                Some(bytes) => {
+                    let result = if f.dropped == 0 {
+                        "asked"
+                    } else {
+                        "asked-partial"
+                    };
+                    decisions.push(WatchDecision {
+                        iface: name.clone(),
+                        result: result.into(),
+                        dropped: f.dropped,
+                        rules: f.rules,
+                    });
+                    queries.push((bytes, index));
+                    asked.push(name);
+                }
+                None => decisions.push(WatchDecision {
+                    iface: name,
+                    result: "dropped".into(),
+                    dropped: f.dropped,
+                    rules: f.rules,
+                }),
+            }
+        }
+        if queries.is_empty() {
+            self.counters.dropped_by_rules += 1;
+        } else {
+            let reply_to = ReplyTo {
+                addr: pkt.src,
+                ifindex: pkt.ifindex,
+            };
+            match proxy::ask(
+                &self.factory,
+                pkt.family,
+                queries,
+                reply_to,
+                self.legacy_window,
+                self.packet_tx.clone(),
+            ) {
+                Ok(()) => self.counters.proxied_queries += 1,
+                Err(e) => {
+                    self.counters.send_errors += 1;
+                    warn!("legacy proxy failed: {e:#}");
+                }
+            }
+        }
+        debug!(iface = %in_name, src = %pkt.src, to = ?asked, "legacy {}", parsed.summary());
+        self.emit(
+            in_name,
+            pkt,
+            format!("{}/legacy", parsed.kind),
+            Some(parsed),
+            decisions,
+        );
+        asked
     }
 
     pub fn handle(&mut self, request: Request) -> Response {
@@ -713,6 +922,9 @@ fn rebuild(message: &Message, keep_q: &[bool], keep_r: &[bool]) -> Vec<u8> {
     let mut m = message.clone();
     let mut it = keep_q.iter();
     m.queries.retain(|_| *it.next().unwrap_or(&true));
+    for q in &mut m.queries {
+        q.set_mdns_unicast_response(false);
+    }
     let mut it = keep_r.iter();
     m.answers.retain(|_| *it.next().unwrap_or(&true));
     m.authorities.retain(|_| *it.next().unwrap_or(&true));
@@ -733,6 +945,7 @@ mod tests {
     struct FakeSocket {
         family: Family,
         sent: Mutex<Vec<(Vec<u8>, u32)>>,
+        unicast: Mutex<Vec<(Vec<u8>, SocketAddr, u32)>>,
         joined: Mutex<Vec<u32>>,
     }
 
@@ -741,6 +954,7 @@ mod tests {
             Arc::new(Self {
                 family,
                 sent: Mutex::new(vec![]),
+                unicast: Mutex::new(vec![]),
                 joined: Mutex::new(vec![]),
             })
         }
@@ -760,12 +974,68 @@ mod tests {
             self.sent.lock().unwrap().push((data.to_vec(), ifindex));
             Ok(())
         }
+        fn send_unicast(&self, data: &[u8], dst: SocketAddr, ifindex: u32) -> anyhow::Result<()> {
+            self.unicast
+                .lock()
+                .unwrap()
+                .push((data.to_vec(), dst, ifindex));
+            Ok(())
+        }
         fn join(&self, ifindex: u32) -> anyhow::Result<()> {
             self.joined.lock().unwrap().push(ifindex);
             Ok(())
         }
         fn leave(&self, ifindex: u32) -> anyhow::Result<()> {
             self.joined.lock().unwrap().retain(|i| *i != ifindex);
+            Ok(())
+        }
+        fn set_read_timeout(&self, _timeout: Option<Duration>) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// The proxy's ephemeral socket: records the query it sent and answers once with what the
+    /// test put in, from the interface the query went to.
+    struct FakeEphemeral {
+        sent: Mutex<Vec<(Vec<u8>, u32)>>,
+        answer: Vec<u8>,
+        answered: std::sync::atomic::AtomicBool,
+    }
+
+    impl MdnsSocket for FakeEphemeral {
+        fn family(&self) -> Family {
+            Family::V4
+        }
+        fn recv(&self) -> anyhow::Result<Received> {
+            if self
+                .answered
+                .swap(true, std::sync::atomic::Ordering::SeqCst)
+            {
+                anyhow::bail!("timeout");
+            }
+            let (_, ifindex) = self.sent.lock().unwrap()[0].clone();
+            Ok(Received {
+                family: Family::V4,
+                data: self.answer.clone(),
+                src: SocketAddr::new("10.1.0.5".parse().unwrap(), 5353),
+                ifindex,
+                reply_to: None,
+            })
+        }
+        fn send_multicast(&self, data: &[u8], ifindex: u32) -> anyhow::Result<()> {
+            self.sent.lock().unwrap().push((data.to_vec(), ifindex));
+            Ok(())
+        }
+        fn send_unicast(&self, _: &[u8], _: SocketAddr, _: u32) -> anyhow::Result<()> {
+            unreachable!()
+        }
+        fn join(&self, _: u32) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn leave(&self, _: u32) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn set_read_timeout(&self, _: Option<Duration>) -> anyhow::Result<()> {
             Ok(())
         }
     }
@@ -807,10 +1077,25 @@ mod tests {
         (cfg, dir)
     }
 
+    fn no_factory() -> SocketFactory {
+        Arc::new(|_, _| anyhow::bail!("no ephemeral sockets in this test"))
+    }
+
     fn setup(rules: &str) -> (Reflector, Arc<FakeSocket>, TempDir) {
+        setup_with(rules, no_factory()).0
+    }
+
+    fn setup_with(
+        rules: &str,
+        factory: SocketFactory,
+    ) -> (
+        (Reflector, Arc<FakeSocket>, TempDir),
+        mpsc::Receiver<Received>,
+    ) {
         let sock = FakeSocket::new(Family::V4);
         let (cfg, dir) = config(&["lan", "iot", "guest"], rules);
-        let mut r = Reflector::new(&cfg, "test".into(), vec![sock.clone()]).unwrap();
+        let (tx, rx) = mpsc::channel(16);
+        let mut r = Reflector::new(&cfg, "test".into(), vec![sock.clone()], factory, tx).unwrap();
         for (i, n) in ["lan", "iot", "guest"].iter().enumerate() {
             r.on_iface_event(IfaceEvent::Link {
                 index: i as u32 + 10,
@@ -823,7 +1108,7 @@ mod tests {
             });
         }
         r.on_iface_event(IfaceEvent::Synced);
-        (r, sock, dir)
+        ((r, sock, dir), rx)
     }
 
     const ACCEPT_ALL: &str = "default = \"accept\"\n";
@@ -876,6 +1161,7 @@ mod tests {
             data: data.to_vec(),
             src: SocketAddr::new(src.parse().unwrap(), 5353),
             ifindex,
+            reply_to: None,
         }
     }
 
@@ -1125,13 +1411,142 @@ action = "accept"
     }
 
     #[test]
+    fn strips_link_local_addresses_and_clears_qu() {
+        let (mut r, sock, _d) = setup(ACCEPT_ALL);
+        let mut m = Message::new(0, MessageType::Response, OpCode::Query);
+        m.add_answer(rr(
+            "bridge.local",
+            RData::A(A("10.1.0.5".parse().unwrap())),
+            true,
+        ));
+        m.add_answer(rr(
+            "bridge.local",
+            RData::AAAA(hickory_proto::rr::rdata::AAAA("fe80::1".parse().unwrap())),
+            true,
+        ));
+        m.add_answer(rr(
+            "bridge.local",
+            RData::AAAA(hickory_proto::rr::rdata::AAAA("fd00::1".parse().unwrap())),
+            true,
+        ));
+        m.add_answer(rr(
+            "bridge.local",
+            RData::A(A("169.254.1.1".parse().unwrap())),
+            true,
+        ));
+        assert_eq!(
+            r.on_packet(packet(11, "10.1.0.5", &m.to_vec().unwrap()))
+                .len(),
+            2
+        );
+        let out = Packet::parse(&sock.take()[0].0).unwrap();
+        assert_eq!(
+            out.addresses(),
+            vec![
+                "10.1.0.5".parse::<IpAddr>().unwrap(),
+                "fd00::1".parse::<IpAddr>().unwrap()
+            ]
+        );
+        assert_eq!(r.counters.dropped_link_local, 4, "two records, two targets");
+        assert_eq!(
+            r.counters.records_dropped, 0,
+            "link-local is not a rule drop"
+        );
+        // A QU question is forwarded without the bit.
+        let mut m = Message::new(7, MessageType::Query, OpCode::Query);
+        let mut q = Query::query(name("_hap._tcp.local"), RecordType::PTR);
+        q.set_mdns_unicast_response(true);
+        m.add_query(q);
+        assert_eq!(
+            r.on_packet(packet(10, "10.0.0.7", &m.to_vec().unwrap()))
+                .len(),
+            2
+        );
+        let out = Packet::parse(&sock.take()[0].0).unwrap();
+        assert!(!out.questions[0].unicast);
+        assert_eq!(out.message.metadata.id, 7, "the id stays");
+    }
+
+    #[test]
+    fn legacy_query_is_proxied_and_the_answer_relayed_by_unicast() {
+        let answer = announce("Living Room", "_hap._tcp", "bridge", "10.1.0.5");
+        let eph = Arc::new(FakeEphemeral {
+            sent: Mutex::new(vec![]),
+            answer,
+            answered: Default::default(),
+        });
+        let eph2 = eph.clone();
+        let factory: SocketFactory = Arc::new(move |family, ephemeral| {
+            assert!(ephemeral && family == Family::V4);
+            Ok(eph2.clone() as Arc<dyn MdnsSocket>)
+        });
+        let ((mut r, sock, _d), mut rx) = setup_with(HOMEKIT, factory);
+        // dig-style: a PTR question from port 40000 on lan.
+        let mut q = packet(10, "10.0.0.7", &browse("_hap._tcp"));
+        q.src.set_port(40000);
+        assert_eq!(
+            r.on_packet(q),
+            vec!["iot"],
+            "asked on iot only (rule 1), guest is dropped"
+        );
+        assert_eq!(r.counters.proxied_queries, 1);
+        assert_eq!(
+            eph.sent.lock().unwrap().len(),
+            1,
+            "the query went out from the ephemeral socket"
+        );
+        assert_eq!(eph.sent.lock().unwrap()[0].1, 11);
+        // The proxy thread delivers the bridge's answer tagged for the querier.
+        let relayed = rx.blocking_recv().expect("an answer from the proxy");
+        assert_eq!(
+            relayed.reply_to,
+            Some(ReplyTo {
+                addr: "10.0.0.7:40000".parse().unwrap(),
+                ifindex: 10
+            })
+        );
+        assert_eq!(r.on_packet(relayed), vec!["lan"]);
+        let uni = sock.unicast.lock().unwrap();
+        assert_eq!(uni.len(), 1);
+        assert_eq!(uni[0].1, "10.0.0.7:40000".parse::<SocketAddr>().unwrap());
+        assert_eq!(uni[0].2, 10);
+        assert_eq!(r.counters.proxied_answers, 1);
+        assert!(sock.sent.lock().unwrap().is_empty(), "nothing multicast");
+        // With the window at 0, a legacy query is dropped.
+        let cfg: Config = toml::from_str("interfaces = [\"a\", \"b\"]\nlegacy_window_ms = 0\nrules_file = \"/nonexistent/x.toml\"").unwrap();
+        let (tx, _rx) = mpsc::channel(1);
+        let mut r2 = Reflector::new(
+            &cfg,
+            "t".into(),
+            vec![FakeSocket::new(Family::V4)],
+            no_factory(),
+            tx,
+        )
+        .unwrap();
+        r2.on_iface_event(IfaceEvent::Link {
+            index: 1,
+            name: "a".into(),
+            up: true,
+        });
+        r2.on_iface_event(IfaceEvent::Link {
+            index: 2,
+            name: "b".into(),
+            up: true,
+        });
+        let mut q = packet(1, "10.0.0.7", &browse("_hap._tcp"));
+        q.src.set_port(40000);
+        assert!(r2.on_packet(q).is_empty());
+    }
+
+    #[test]
     fn missing_rules_file_means_drop_everything() {
         let sock = FakeSocket::new(Family::V4);
         let cfg: Config = toml::from_str(
             "interfaces = [\"a\", \"b\"]\nrules_file = \"/nonexistent/discowall/rules.toml\"",
         )
         .unwrap();
-        let mut r = Reflector::new(&cfg, "test".into(), vec![sock]).unwrap();
+        let (tx, _rx) = mpsc::channel(1);
+        let mut r = Reflector::new(&cfg, "test".into(), vec![sock], no_factory(), tx).unwrap();
         r.on_iface_event(IfaceEvent::Link {
             index: 1,
             name: "a".into(),

@@ -17,3 +17,11 @@ interfaces = ["lan", "iot"]
 # A packet identical to one seen within this window is dropped (a second reflector, a bridge that
 # delivers twice). mDNS repeats announcements no faster than once per second.
 #dedup_window_ms = 500
+
+# Drop A/AAAA records with link-local addresses (fe80::/10, 169.254/16): unreachable from another
+# segment, and clients try them first.
+#strip_link_local = true
+
+# A one-shot query from an ephemeral port (dig, some libraries) is asked on the target interfaces
+# on the querier's behalf and the answers of this window are relayed to it by unicast. 0 drops them.
+#legacy_window_ms = 500

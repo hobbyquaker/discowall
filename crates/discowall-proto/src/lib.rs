@@ -94,6 +94,12 @@ pub struct Counters {
     pub dropped_by_rules: u64,
     /// Questions and records removed from packets that still crossed.
     pub records_dropped: u64,
+    /// Link-local address records (fe80::/10, 169.254/16) removed: useless on another segment.
+    pub dropped_link_local: u64,
+    /// One-shot queries from an ephemeral port that were asked on the querier's behalf.
+    pub proxied_queries: u64,
+    /// Answers relayed by unicast to such queriers.
+    pub proxied_answers: u64,
     pub send_errors: u64,
 }
 

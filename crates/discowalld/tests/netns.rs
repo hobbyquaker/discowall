@@ -74,6 +74,22 @@ fn discoctl() -> PathBuf {
     p
 }
 
+fn ctl_json(sock: &std::path::Path, args: &[&str]) -> String {
+    let out = Command::new(discoctl())
+        .arg("--socket")
+        .arg(sock)
+        .arg("--json")
+        .args(args)
+        .output()
+        .expect("discoctl");
+    assert!(
+        out.status.success(),
+        "discoctl {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout).to_string()
+}
+
 fn probe() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/mdns_probe.py")
 }
@@ -115,6 +131,11 @@ fn inner() {
     sh("ip addr add 10.2.0.1/24 dev b0 && ip link set b0 up");
     a.sh("ip link set lo up && ip addr add 10.1.0.2/24 dev a1 && ip link set a1 up");
     b.sh("ip link set lo up && ip addr add 10.2.0.2/24 dev b1 && ip link set b1 up");
+    sh("ip -6 addr add fd00:1::1/64 dev a0 && ip -6 addr add fd00:2::1/64 dev b0");
+    a.sh("ip -6 addr add fd00:1::2/64 dev a1");
+    b.sh("ip -6 addr add fd00:2::2/64 dev b1");
+    // Duplicate address detection must finish before the v6 addresses are usable.
+    std::thread::sleep(Duration::from_millis(1500));
 
     let dir = std::env::temp_dir().join(format!("discowall-netns-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -125,7 +146,7 @@ fn inner() {
     std::fs::write(
         &cfg,
         format!(
-            "interfaces = [\"a0\", \"b0\"]\nipv6 = false\ncontrol_socket = {:?}\nrules_file = {:?}\n",
+            "interfaces = [\"a0\", \"b0\"]\ncontrol_socket = {:?}\nrules_file = {:?}\n",
             sock.display(),
             rules.display()
         ),
@@ -209,6 +230,70 @@ fn inner() {
     }
     assert_eq!(status["counters"]["tx"], 1, "{status}");
     assert_eq!(status["counters"]["send_errors"], 0);
+
+    // IPv6: the same query over ff02::fb, from leaf A, arrives in leaf B from the router's
+    // link-local address on b0.
+    let recv_b6 = b
+        .run(&["python3"])
+        .arg(probe())
+        .args(["recv", "v6:b1", "3"])
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(300));
+    a.sh(&format!(
+        "python3 {} send v6:a1 query _hap._tcp.local",
+        probe().display()
+    ));
+    let out_b6 = String::from_utf8_lossy(&recv_b6.wait_with_output().unwrap().stdout)
+        .trim()
+        .to_string();
+    assert!(
+        out_b6.starts_with("fe80::") && out_b6.ends_with(":5353 query _hap._tcp.local"),
+        "v6 reflection: {out_b6:?}"
+    );
+
+    // A one-shot query from an ephemeral port in A: the daemon asks in B on A's behalf, a legacy
+    // responder in B answers the daemon by unicast, and the daemon relays the answer to A by
+    // unicast from port 5353.
+    let responder = b
+        .run(&["python3"])
+        .arg(probe())
+        .args([
+            "respond",
+            "10.2.0.2",
+            "4",
+            "Printer",
+            "_ipp._tcp",
+            "printer",
+            "10.2.0.7",
+        ])
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(300));
+    let legacy = a
+        .run(&["python3"])
+        .arg(probe())
+        .args(["legacy", "10.1.0.2", "_ipp._tcp.local", "3"])
+        .output()
+        .unwrap();
+    let got = String::from_utf8_lossy(&legacy.stdout).trim().to_string();
+    assert_eq!(
+        got,
+        "10.1.0.1:5353 response _ipp._tcp.local _ipp._tcp.local/12 Printer._ipp._tcp.local/33 Printer._ipp._tcp.local/16 printer.local/1",
+        "the legacy answer must come back by unicast from the router"
+    );
+    let answered = String::from_utf8_lossy(&responder.wait_with_output().unwrap().stdout)
+        .trim()
+        .to_string();
+    assert!(
+        answered.starts_with("answered 10.2.0.1:"),
+        "the responder saw the daemon's ephemeral query: {answered:?}"
+    );
+    let status: serde_json::Value = serde_json::from_str(&ctl_json(&sock, &["status"])).unwrap();
+    assert_eq!(status["counters"]["proxied_queries"], 1, "{status}");
+    assert_eq!(status["counters"]["proxied_answers"], 1, "{status}");
 
     // Rules through discoctl: default drop, HomeKit from b0 may reach a0, only for host "bridge".
     let ctl = |args: &[&str]| -> String {

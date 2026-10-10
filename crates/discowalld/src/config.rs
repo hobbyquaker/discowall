@@ -24,6 +24,14 @@ pub struct Config {
     /// that delivers twice). mDNS repeats announcements no faster than once per second.
     #[serde(default = "default_dedup")]
     pub dedup_window_ms: u64,
+    /// Drop A/AAAA records with link-local addresses (fe80::/10, 169.254/16) from forwarded packets:
+    /// they are unreachable from another segment and make clients try a dead address first.
+    #[serde(default = "yes")]
+    pub strip_link_local: bool,
+    /// A one-shot query (from an ephemeral port) is asked on the target interfaces on the querier's
+    /// behalf and the answers of this window are relayed to it by unicast. 0 drops such queries.
+    #[serde(default = "default_legacy")]
+    pub legacy_window_ms: u64,
 }
 
 fn yes() -> bool {
@@ -36,6 +44,9 @@ fn default_rules() -> PathBuf {
     PathBuf::from("/etc/discowall/rules.toml")
 }
 fn default_dedup() -> u64 {
+    500
+}
+fn default_legacy() -> u64 {
     500
 }
 
@@ -82,6 +93,8 @@ mod tests {
         c.validate().unwrap();
         assert!(c.ipv4 && c.ipv6);
         assert_eq!(c.dedup_window_ms, 500);
+        assert!(c.strip_link_local);
+        assert_eq!(c.legacy_window_ms, 500);
         assert_eq!(
             c.control_socket,
             PathBuf::from("/run/discowall/control.sock")

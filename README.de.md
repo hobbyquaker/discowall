@@ -75,9 +75,9 @@ Personentage für die erste Version.
 - ☑️ **Lab:** Koexistenz mit avahi-daemon auf Port 5353 messen
 - 🕵️ **P1:** Parser, Host-Tabelle und Record-Bündel, Regelkette, Steuer-Socket, `discoctl rule …`
 - 🕵️ **P2:** `discoctl watch`, `hosts`, `services`, `stats`, `status`; Zähler pro Regel, `log`
-- 🏗️ **P3:** Stellvertreter für einmalige Anfragen und das QU-Bit, Link-local-AAAA entfernen, IPv6 durchgehend,
+- 🕵️ **P3:** Stellvertreter für einmalige Anfragen und das QU-Bit, Link-local-AAAA entfernen, IPv6 durchgehend,
   Deduplizierung, Fuzzing, Härtung der Unit
-- ☑️ **P4:** Pakete (Tarball, deb, rpm, OpenWrt), Cross-Builds, Release-Workflow, README und Manpages
+- 🏗️ **P4:** Pakete (Tarball, deb, rpm, OpenWrt), Cross-Builds, Release-Workflow, README und Manpages
 - 💤 nftables-Sets mit den Adressen erlaubter Hosts
 - 💤 SSDP (UPnP) als zweites Protokoll
 - 💤 FreeBSD-Backend und pfSense-Paket

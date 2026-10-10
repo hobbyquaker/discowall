@@ -487,6 +487,46 @@ mod tests {
         assert!(!is_host(""));
     }
 
+    /// Not a fuzzer, but the same idea without nightly: random bytes and mutated real packets must
+    /// never panic in parse, classification or the rebuild; the parser's contract is "Err or a Packet".
+    #[test]
+    fn random_and_mutated_input_never_panics() {
+        let mut state = 0x9E37_79B9_7F4A_7C15u64;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        let seeds = [announcement(), browse_query(true)];
+        for i in 0..20_000 {
+            let bytes: Vec<u8> = if i % 2 == 0 {
+                let len = (next() % 300) as usize;
+                (0..len).map(|_| next() as u8).collect()
+            } else {
+                let mut b = seeds[(i / 2) % seeds.len()].clone();
+                for _ in 0..1 + next() % 4 {
+                    let at = (next() as usize) % b.len();
+                    b[at] = next() as u8;
+                }
+                if next() % 8 == 0 {
+                    b.truncate((next() as usize) % b.len());
+                }
+                b
+            };
+            if let Ok(p) = Packet::parse(&bytes) {
+                let _ = (
+                    p.service_types(),
+                    p.instances(),
+                    p.hosts(),
+                    p.addresses(),
+                    p.summary(),
+                );
+                let _ = p.message.to_vec();
+            }
+        }
+    }
+
     #[test]
     fn garbage_is_an_error() {
         assert!(Packet::parse(b"\x00\x01\x02").is_err());

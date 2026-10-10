@@ -5,6 +5,10 @@
   mdns_probe.py send <iface-addr> announce <inst> <svc> <host> <ip>
                                                             multicast PTR+SRV+TXT+A with cache-flush
   mdns_probe.py recv <iface-addr> <timeout-s> [count]       print "src:port kind names" per packet
+  mdns_probe.py legacy <iface-addr> <name> <timeout-s>      ask from an ephemeral port, print the unicast answer
+  mdns_probe.py respond <iface-addr> <timeout-s> <inst> <svc> <host> <ip>
+                                                            answer the first PTR query by unicast (legacy style)
+  An <iface-addr> of the form v6:<ifname> uses IPv6 (ff02::fb) on that interface.
 """
 import socket
 import struct
@@ -15,14 +19,37 @@ GROUP = "224.0.0.251"
 PORT = 5353
 
 
-def sock(addr):
+GROUP6 = "ff02::fb"
+
+
+def sock6(ifname, port=PORT):
+    idx = socket.if_nametoindex(ifname)
+    s = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+    s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_HOPS, 255)
+    s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_LOOP, 0)
+    s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_MULTICAST_IF, idx)
+    s.bind(("::", port))
+    s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_JOIN_GROUP,
+                 socket.inet_pton(socket.AF_INET6, GROUP6) + struct.pack("@I", idx))
+    return s, (GROUP6, PORT, 0, idx)
+
+
+def open_sock(addr, port=PORT):
+    if addr.startswith("v6:"):
+        return sock6(addr[3:], port)
+    return sock(addr, port), (GROUP, PORT)
+
+
+def sock(addr, port=PORT):
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
     s.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 255)
     s.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 0)
     s.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(addr))
-    s.bind(("0.0.0.0", PORT))
+    s.bind(("0.0.0.0", port))
     s.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP,
                  struct.pack("4s4s", socket.inet_aton(GROUP), socket.inet_aton(addr)))
     return s
@@ -87,11 +114,39 @@ def describe(data):
 
 def main():
     mode, addr = sys.argv[1], sys.argv[2]
-    s = sock(addr)
+    if mode == "legacy":
+        # An ephemeral port: the responder (or the proxy) answers by unicast.
+        s, group = open_sock(addr, 0)
+        s.sendto(query(sys.argv[3]), group)
+        s.settimeout(float(sys.argv[4]))
+        try:
+            data, src = s.recvfrom(9000)
+            print(f"{src[0]}:{src[1]} {describe(data)}", flush=True)
+        except socket.timeout:
+            print("timeout", flush=True)
+        return
+    s, group = open_sock(addr)
     if mode == "send":
         what = sys.argv[3]
         pkt = query(sys.argv[4]) if what == "query" else announce(*sys.argv[4:8])
-        s.sendto(pkt, (GROUP, PORT))
+        s.sendto(pkt, group)
+        return
+    if mode == "respond":
+        s.settimeout(float(sys.argv[3]))
+        try:
+            while True:
+                data, src = s.recvfrom(9000)
+                _, flags, qd, *_ = struct.unpack("!HHHHHH", data[:12])
+                if flags & 0x8000 or qd == 0:
+                    continue
+                # A legacy response: the query's id, the question repeated, answers appended.
+                body = announce(*sys.argv[4:8])
+                reply = data[:2] + struct.pack("!HHHHH", 0x8400, 1, 3, 0, 1) + data[12:] + body[12:]
+                s.sendto(reply, src)
+                print(f"answered {src[0]}:{src[1]}", flush=True)
+                return
+        except socket.timeout:
+            print("timeout", flush=True)
         return
     deadline = time.monotonic() + float(sys.argv[3])
     want = int(sys.argv[4]) if len(sys.argv) > 4 else 1
