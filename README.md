@@ -60,8 +60,8 @@ nftables sets, so that exactly one such rule per network pair is enough.
 ## Install
 
 Releases on GitHub carry static binaries for x86_64, aarch64 and armv7 (musl, no dependencies), as a tarball with
-the man pages, the systemd unit and the examples, and as `.deb` and `.rpm` packages. On OpenWrt use the static
-tarball or build the two packages with the SDK (see *OpenWrt* below).
+the man pages, the systemd unit and the examples, as `.deb` and `.rpm` packages, and as OpenWrt `.ipk`/`.apk`
+packages with the LuCI app (see *OpenWrt* below).
 
 ```sh
 # Debian, Ubuntu, Armbian
@@ -90,11 +90,49 @@ keep running on the same host; discowall only forwards and never answers for the
 
 ### OpenWrt
 
-There are no `.ipk`/`.apk` files on the release yet (that is task 16 on the roadmap); today there are two ways in.
+Every release from 0.0.2 on carries OpenWrt packages: `discowall` per architecture and `luci-app-discowall` (the
+LuCI web UI under *Services → discowall*: status, the rule chain edited live with Save and Apply, hosts and
+services, settings). `.ipk` for OpenWrt 24.10 (opkg), `.apk` for OpenWrt 25.12 and later. They are not signed:
+install the downloaded files locally. The `discowall` package holds the release's static musl binary of the
+architecture's family, so one binary serves every CPU of that family.
 
-**1. Static binaries from the release tarball** (x86_64, aarch64 and armv7 routers — the binaries are static musl
-and run on any OpenWrt of that architecture; MIPS routers are not covered yet). Pick the tarball for your CPU
-(`uname -m`: `x86_64`, `aarch64`, `armv7l`), then on the router:
+| OpenWrt architecture (`opkg print-architecture`, `apk --print-arch`) | Package |
+| --- | --- |
+| `x86_64` | `discowall_<version>-r1_x86_64.ipk` |
+| `aarch64_cortex-a53`, `aarch64_cortex-a72`, `aarch64_generic` | `discowall_<version>-r1_<arch>.ipk` |
+| `arm_cortex-a7_neon-vfpv4`, `arm_cortex-a8_vfpv3`, `arm_cortex-a9`, `arm_cortex-a9_neon`, `arm_cortex-a9_vfpv3-d16`, `arm_cortex-a15_neon-vfpv4` | `discowall_<version>-r1_<arch>.ipk` |
+
+On OpenWrt 25.12 the same names end in `.apk`. On the router (OpenWrt 24.10, an aarch64_cortex-a53 router as the
+example):
+
+```sh
+opkg print-architecture                     # the line with the highest priority is the router's architecture
+cd /tmp && v=0.0.2 && u=https://github.com/hobbyquaker/discowall/releases/download/v$v
+wget $u/discowall_$v-r1_aarch64_cortex-a53.ipk $u/luci-app-discowall_$v-r1_all.ipk
+opkg update && opkg install ./discowall_$v-r1_aarch64_cortex-a53.ipk ./luci-app-discowall_$v-r1_all.ipk
+# OpenWrt 25.12: apk --print-arch; the same with .apk, then
+# apk update && apk add --allow-untrusted ./discowall_$v-r1_<arch>.apk ./luci-app-discowall_$v-r1_all.apk
+```
+
+(`opkg update` / `apk update` only so that `luci-base` can come from the feed.) The `arm_*` packages hold the armv7
+hard-float binary, which needs a VFP unit; Broadcom Northstar routers (BCM4708/4709, `arm_cortex-a9` on bcm53xx)
+have none (the bcm53xx SDK sets no `HAS_FPU`), and the binary is expected not to run there (not tried on such a
+router).
+**Another architecture of the same family** (say `aarch64_cortex-a76`, `arm_cortex-a7_vfpv4`): take the package of
+a sibling and tell opkg to accept that architecture as well — `--add-arch` replaces opkg's list, so repeat the
+router's own entries:
+
+```sh
+opkg install $(opkg print-architecture | awk '{printf "--add-arch %s:%s ", $2, $3}') \
+  --add-arch aarch64_cortex-a53:5 ./discowall_0.0.2-r1_aarch64_cortex-a53.ipk
+```
+
+(A plain `opkg install` of a foreign-architecture file crashed opkg 2024.10.16 with a segmentation fault, measured
+on OpenWrt 24.10.8.) For `apk` this is untried; use the tarball below. **MIPS** routers (`mips_24kc`,
+`mipsel_24kc`, …) are not covered: Rust has no tier-2 musl target for them.
+
+**Without packages: the static binaries from the release tarball** (x86_64, aarch64, armv7). Pick the tarball for
+your CPU (`uname -m`: `x86_64`, `aarch64`, `armv7l`), then on the router:
 
 ```sh
 cd /tmp && wget https://github.com/hobbyquaker/discowall/releases/download/v0.0.2/discowall-0.0.2-aarch64-unknown-linux-musl.tar.gz
@@ -106,14 +144,11 @@ wget -O /tmp/90_discowall https://raw.githubusercontent.com/hobbyquaker/discowal
 chmod +x /etc/init.d/discowall && sh /tmp/90_discowall
 ```
 
-**2. Build the packages with the OpenWrt SDK** (gives you `discowall_<version>_<arch>.ipk` and
-`luci-app-discowall_<version>_all.ipk` — the LuCI web UI under *Services → discowall*: status, the rule chain
-edited live with Save and Apply, hosts and services, settings). `contrib/openwrt/discowall` builds the daemon with
-the packages feed's Rust (about an hour the first time), `contrib/openwrt/luci-app-discowall` the UI;
-[tests/lab/openwrt.md](tests/lab/openwrt.md) has the exact steps, tested with OpenWrt 24.10. Install with
-`opkg install ./discowall_*.ipk ./luci-app-discowall_*.ipk` (OpenWrt 25: `apk add --allow-untrusted …`).
+**Building the packages yourself** with the OpenWrt SDK: `contrib/openwrt/build-packages.sh` packages the release
+binaries for any SDK (a minute or two, no Rust); `contrib/openwrt/discowall` compiles the daemon with the packages
+feed's Rust instead (about an hour the first time). [tests/lab/openwrt.md](tests/lab/openwrt.md) has the steps.
 
-Either way the settings live in UCI; name at least two interfaces and start:
+However it is installed, the settings live in UCI; name at least two interfaces and start:
 
 ```sh
 uci add_list discowall.main.interface=br-lan
@@ -317,7 +352,7 @@ estimate, record of the decisions) is in [mdns-router-research.md](mdns-router-r
 - 🕵️ LuCI app for the OpenWrt package (web UI for rules, hosts, services, status; tested on an OpenWrt 24.10 VM in the lab 2026-10-13)
 - 🤷 pfSense package and web UI (FreeBSD port, packagegui, rules page; OPNsense plugin to be decided)
 - 🤷 IGMP snooping without a querier kills SSDP minutes after start (measured on a Linux bridge): document, or refresh memberships, or be the querier
-- 🏗️ OpenWrt packages as release assets (luci-app `all`, discowall `.ipk`/`.apk` per architecture from the musl binaries)
+- 🕵️ OpenWrt packages as release assets (luci-app `all`, discowall `.ipk`/`.apk` per architecture from the musl binaries)
 - ✅ Concept: rule model, CLI and runtime discussed with the maintainer
 
 🏗️ in progress · 🕵️ built, under test · ☑️ ready for implementation · 🤷 to be clarified · 💤 later · ✅ done

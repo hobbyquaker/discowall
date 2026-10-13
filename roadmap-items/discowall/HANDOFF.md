@@ -38,13 +38,13 @@ OpenWrt VM (905) are on the node and stay (see *Cold start*).
 - **State of the items:** 2–6 (P0–P4) and 8 (SSDP) are 🕵️ — v0.0.1 released, and now exercised end to end in the lab
   by the 0.0.2-dev build (install from the deb, avahi both ways, coexistence, legacy/QU, SSDP with minidlna and
   gssdp-discover, link/reboot/hot-plug dynamics, 306 rules + 50 services soak, IPv6 only, upgrade 0.0.1 → dev);
-  never on a real router. 10 ✅ (coexistence measured). 11 ✅ (nine cases green on 2026-10-13). 12 ✅ (avahi inside the namespace
+  never on a real router. 10 ✅ (coexistence measured). 11 ✅ (nine cases green on 2026-10-13). 16 (OpenWrt packages on the release) 🕵️. 12 ✅ (avahi inside the namespace
   test, green in CI). B-1, B-2, B-3 ✅ (found and fixed in
   the lab, see below). 13 (LuCI app) 🕵️: built and tested on an OpenWrt 24.10.8 VM in the lab (36/36, with the pages in a browser), see its item; 14 (pfSense package + UI), 15 (IGMP snooping without querier) 🤷 for the
   maintainer; 7, 9 💤.
 - **Released as v0.0.2 on 2026-10-13:** B-1, B-2, B-3; `discoctl rule add|insert --json`; UCI-rendered OpenWrt config;
-  `luci-app-discowall` (in the repo, not as a release asset — the OpenWrt packages are built with the SDK,
-  `tests/lab/openwrt.md`); the avahi namespace test, run by CI.
+  `luci-app-discowall`; the avahi namespace test, run by CI. Since task 16 the release also carries the OpenWrt
+  packages (`.ipk` 24.10, `.apk` 25.x, the D-14 architectures, unsigned), built from the release binaries.
 - **Open for the maintainer:** OQ-10 (default policy), OQ-11 (which real router); task 14 questions (web-ui
   research note); task 15 (document IGMP snooping, or mitigate); try v0.0.2 on a real router (tasks 2–6, 8 → ✅); task 13's two questions
   (OpenWrt 25.12, firewall rules in the package).
@@ -54,6 +54,22 @@ OpenWrt VM (905) are on the node and stay (see *Cold start*).
   --all` first); after a directory rename `touch crates/discowalld/tests/netns.rs` (the test binary embeds absolute
   paths — cost an hour on 2026-10-13); the README's Roadmap list is hand-maintained in both languages; SSDP over IPv6 is implemented but only v4-tested; the `discowalld --version` string is the
   workspace version, so dev debs (`--deb-version 0.0.2~dev2`) still say 0.0.1.
+
+## 2026-10-13 (Opus lane) — task 16: OpenWrt .ipk/.apk on the v0.0.2 release, release job for future tags
+
+- **On v0.0.2** (`gh release upload`, the maintainer's word): `luci-app-discowall_0.0.2-r1_all.{ipk,apk}` and
+  `discowall_0.0.2-r1_<arch>.{ipk,apk}` for the ten D-14 architectures — 22 files, built in the lab's SDK container
+  with `contrib/openwrt/build-packages.sh` from the release's own tarballs (binaries byte-identical). The x86_64 ipk
+  and the luci ipk passed `lab.py run --ui … openwrt` 36/36 on the 24.10.8 VM after a clean removal; the other
+  architectures and all `.apk` checked by control data and ELF only (D-15).
+- **New:** `contrib/openwrt/discowall-prebuilt` (the package from the static binary, no Rust), `build-packages.sh`,
+  and the release workflow's `openwrt` job (24.10.8 and 25.12.5 × ten SDK targets) plus `workflow_dispatch` with a
+  `tag`. **Not yet run on GitHub** — it needs the push; a dispatch with `tag: v0.0.2` afterwards would re-upload the
+  same files with `--clobber` and is the first real test.
+- **For the maintainer:** `arm_cortex-a9` (bcm53xx) is in D-14 but its SDK has no `HAS_FPU` and the armv7 binary is
+  hard-float VFPv3 — expected not to run on BCM4708/4709 (README says so; drop it or keep it?). opkg has no
+  `--force-architecture`; the README documents `--add-arch` (a plain foreign-arch install segfaulted opkg, measured).
+  The OpenWrt versions in the matrix are pinned (bump per point release). Asset names use the SDK's `-r1`.
 
 ## 2026-10-13 (release) — v0.0.2 on GitHub, task 13's LuCI app built and lab-tested, task 12 green in CI
 
@@ -122,11 +138,3 @@ OpenWrt VM (905) are on the node and stay (see *Cold start*).
   a manual per-release checklist on the real router.
 - **Next:** the maintainer answers task 11's questions and OQ-10/OQ-11; tries v0.0.1 on a router (tasks 2–6 and
   8 → ✅); a session can take task 12 without the lab.
-
-## 2026-10-10 (late night) — SSDP in, version set to 0.0.1 for the first release
-
-- **Task 8 (SSDP)** 🕵️ on the maintainer's word: second socket pair on 1900, parser, notifications under the rules,
-  searches proxied with unicast relay, `proto` match, UPnP recipe in the READMEs, namespace test end to end. 44
-  tests. The maintainer also asked for a release as **0.0.1** once CI is green (the workspace version is 0.0.1
-  now; the tag `v0.0.1` runs the release workflow for the first time) and for research on end-to-end testing in
-  his Proxmox environment.
