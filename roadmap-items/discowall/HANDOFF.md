@@ -40,13 +40,13 @@ running on the node and stay (see *Cold start*).
   gssdp-discover, link/reboot/hot-plug dynamics, 306 rules + 50 services soak, IPv6 only, upgrade 0.0.1 → dev);
   never on a real router. 10 ✅ (coexistence measured). 11 ✅ (nine cases green on 2026-10-13). 12 🕵️ (avahi inside
   the namespace test; passes in the lab container, CI run pending the push). B-1, B-2, B-3 ✅ (found and fixed in
-  the lab, see below). 13 (LuCI app), 14 (pfSense package + UI), 15 (IGMP snooping without querier) 🤷 for the
+  the lab, see below). 13 (LuCI app) ☑️ after the Q&A of 2026-10-13 (D-10…D-13: UCI settings, `discoctl --json`, app in contrib, SDK container 904 + OpenWrt VM 905 allowed in the lab); 14 (pfSense package + UI), 15 (IGMP snooping without querier) 🤷 for the
   maintainer; 7, 9 💤.
 - **Unreleased changes since v0.0.1** (all on `master`, local): B-1 no ANSI codes off a terminal; B-2 dedup keyed per
   address family (avahi's dual-family queries); B-3 `discoctl save` writes the rules file itself (`RuleDump` +
   `RuleSaved` in the protocol; the daemon's `/etc` stays read-only under the hardened unit); the avahi namespace test;
   `ci.yml` installs avahi. The workspace version is still 0.0.1 — a release needs the maintainer's word and a bump.
-- **Open for the maintainer:** OQ-10 (default policy), OQ-11 (which real router); task 13/14 questions (web-ui
+- **Open for the maintainer:** OQ-10 (default policy), OQ-11 (which real router); task 14 questions (web-ui
   research note); task 15 (document IGMP snooping, or mitigate); push `master` so CI runs the avahi test; a release
   with the three fixes (0.0.2) once that is green; try it on a real router (tasks 2–6, 8 → ✅).
 - **Where to continue without the maintainer:** nothing big — the lab's remaining ideas are an OpenWrt VM (needs the

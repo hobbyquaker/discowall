@@ -14,3 +14,12 @@ Decisions are made by the maintainer only; a change is recorded here with its da
 | D-7 | **No MAC-based rules.** Interface, IP address/prefix and names are the match keys; plain UDP sockets, no `AF_PACKET`, no `NET_RAW`, the daemon runs as its own user. |
 | D-8 | **The nftables-set feed** (addresses of allowed hosts per interface pair, research 3.8) is a **later phase** (task 7), not v1. |
 | D-9 | **The agent working documents stay in this repository and go public with it.** Nothing lab-specific is written into them. Agents commit locally; **push, tags and releases are the maintainer's.** |
+
+Decisions from the Q&A on task 13 (LuCI app) of 2026-10-13; the questions and the maintainer's answers are in the item.
+
+| | Decision (2026-10-13) |
+| --- | --- |
+| D-10 | **On OpenWrt the daemon's settings live in UCI** (`/etc/config/discowall`: interfaces, ipv4, ipv6, ssdp); the init script renders `/etc/discowall/discowall.toml` from it before start. **The rule chain stays in `rules.toml`** under `discoctl`/the daemon, on every platform. LuCI edits the settings through UCI and the rules through the daemon. |
+| D-11 | **`discoctl rule add` and `rule insert` accept `--json <RuleSpec>`** besides the token syntax, so that UIs pass rule objects through instead of building tokens. No protocol change (the protocol already carries `RuleSpec`). |
+| D-12 | **`luci-app-discowall` lives in this repository** under `contrib/openwrt/`, beside the package, built with the OpenWrt SDK; upstreaming to the `openwrt/luci` feed comes after the `discowall` package is in `openwrt/packages`. **Target: the latest stable OpenWrt** — 24.10 today; the target moves with each release. |
+| D-13 | **The LuCI app's rule editor edits live** (every change goes to the daemon at once, as `discoctl` does; Save writes `rules.toml`, Apply reloads it, the unsaved flag is shown) — the iptables-like model of D-5 in the UI. First version: Status, Rules, Hosts and Services views; one ACL group `luci-app-discowall` (admin: read and write). |
