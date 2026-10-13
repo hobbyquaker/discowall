@@ -22,8 +22,13 @@ pub enum Request {
         index: usize,
     },
     RuleFlush,
-    /// Write the chain to the rules file.
+    /// The daemon writes the chain to the rules file itself. Under the shipped unit `/etc` is
+    /// read-only for it (B-3), so `discoctl save` uses `RuleDump` + `RuleSaved` instead.
     RuleSave,
+    /// The chain rendered as the rules file (`RulesToml`), for a client that writes it.
+    RuleDump,
+    /// A client has written the dump to the rules file: the chain counts as saved.
+    RuleSaved,
     /// Reload the chain from the rules file.
     RuleApply,
     RuleTest(TestSpec),
@@ -44,6 +49,11 @@ pub enum Response {
     Pong,
     Status(Status),
     Rules(RuleList),
+    /// The chain as rules-file text and the path the daemon reads it from.
+    RulesToml {
+        path: String,
+        toml: String,
+    },
     Ok,
     Test(TestResult),
     Hosts {

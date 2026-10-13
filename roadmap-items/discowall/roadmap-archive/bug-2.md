@@ -1,4 +1,4 @@
-## B-2. Dedup drops the IPv4 twin of a query avahi sends on both families at once 🏗️
+## B-2. Dedup drops the IPv4 twin of a query avahi sends on both families at once ✅
 
 **Created** 2026-10-13.
 
@@ -10,3 +10,6 @@ the two families half a second apart.
 
 **Fix:** the dedup key is payload **and address family**; a unit test sends the same bytes over v4 and v6 back to
 back and expects both forwarded. The second-reflector case (same bytes, same family, another source) still dedups.
+
+**Fixed** 2026-10-13 (the dedup key is payload + address family; unit test with the IPv6 twin), verified in the lab:
+case `avahi` browses and resolves over IPv4 and IPv6 after a cache flush, 8/8 checks with the 0.0.2-dev build. ✅

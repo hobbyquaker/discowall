@@ -223,10 +223,14 @@ SSDP_RULES = [
 
 def install_deb(lab, deb):
     lab.push("router", deb, "/root/" + os.path.basename(deb))
-    p = lab.sh("router", "export DEBIAN_FRONTEND=noninteractive; "
-                         f"apt-get -qq -y -o Dpkg::Options::=--force-confold install /root/{os.path.basename(deb)}",
+    p = lab.sh("router", "export DEBIAN_FRONTEND=noninteractive; apt-get -qq -y --allow-downgrades "
+                         f"-o Dpkg::Options::=--force-confold install /root/{os.path.basename(deb)}",
                timeout=300)
     return p
+
+
+def deb_version(lab):
+    return lab.out("router", "dpkg-query -W -f '${Version}' discowall").strip()
 
 
 def case_install(lab, args):
@@ -522,17 +526,19 @@ def case_dynamics(lab, args):
 
 
 ZEROCONF_PUBLISH = r'''
-import socket, sys, time
-from zeroconf import Zeroconf, ServiceInfo, IPVersion, InterfaceChoice
+import asyncio, socket, sys
+from zeroconf import ServiceInfo, IPVersion
+from zeroconf.asyncio import AsyncZeroconf
 n = int(sys.argv[1]); addr = sys.argv[2]
-zc = Zeroconf(interfaces=[addr], ip_version=IPVersion.V4Only)
-infos = [ServiceInfo("_labsvc._tcp.local.", f"svc{i:03d}._labsvc._tcp.local.", addresses=[socket.inet_aton(addr)],
-                     port=9000 + i, properties={"n": str(i)}, server=f"labsvc{i:03d}.local.") for i in range(n)]
-for info in infos:
-    zc.register_service(info, allow_name_change=False)
-print("registered", n, flush=True)
-while True:
-    time.sleep(3600)
+async def main():
+    zc = AsyncZeroconf(interfaces=[addr], ip_version=IPVersion.V4Only)
+    infos = [ServiceInfo("_labsvc._tcp.local.", f"svc{i:03d}._labsvc._tcp.local.", addresses=[socket.inet_aton(addr)],
+                         port=9000 + i, properties={"n": str(i)}, server=f"labsvc{i:03d}.local.") for i in range(n)]
+    # Registering probes each name for about a second; all at once, not one after the other.
+    await asyncio.gather(*(zc.async_register_service(info, allow_name_change=False) for info in infos))
+    print("registered", n, flush=True)
+    await asyncio.Event().wait()
+asyncio.run(main())
 '''
 
 
@@ -554,9 +560,13 @@ def case_scale(lab, args):
     checks.append(Check("306 rules loaded", n_rules == 306, str(n_rules)))
     lab.sh("iothost", f"printf %s {shlex.quote(ZEROCONF_PUBLISH)} > /root/publish50.py", check=True)
     lab.bg_start("iothost", "svc50", f"python3 /root/publish50.py 50 {lab.addr('iot')}")
-    time.sleep(4)
+    for _ in range(30):
+        time.sleep(2)
+        if "registered 50" in lab.out("iothost", "cat /tmp/lab-svc50.out"):
+            break
     checks.append(Check("50 services registered (python-zeroconf)",
-                        "registered 50" in lab.out("iothost", "cat /tmp/lab-svc50.out")))
+                        "registered 50" in lab.out("iothost", "cat /tmp/lab-svc50.out"),
+                        lab.out("iothost", "journalctl -u lab-svc50 --no-pager -o cat | tail -3")))
     lines = browse(lab, "lanhost", "lan", service="_labsvc._tcp", timeout=12)
     found = {l.split(";")[3] for l in lines if l.startswith("+;lan;IPv4;")}
     checks.append(Check("lan browses all 50 instances", len(found) == 50, f"{len(found)} instances"))
@@ -584,9 +594,9 @@ def case_scale(lab, args):
 def case_ipv6only(lab, args):
     """8. IPv6 only: ipv4 = false, the same browse over the ULA addresses, nothing over IPv4."""
     lab.ensure_printer()
-    lab.set_rules(PRINTER_RULES)
     lab.set_config(ipv4=False)
     lab.restart_daemon()
+    lab.set_rules(PRINTER_RULES)  # a restart reloads the rules file; the chain is set afterwards
     iot6 = lab.addr("iot", v6=True)
     checks = []
     st = lab.ctl_json("status")
@@ -600,6 +610,7 @@ def case_ipv6only(lab, args):
     checks.append(Check("lan resolves iothost.local over IPv6", r6.endswith(iot6), r6))
     lab.set_config()
     lab.restart_daemon()
+    lab.set_rules(PRINTER_RULES)
     return checks
 
 
@@ -611,20 +622,28 @@ def case_upgrade(lab, args):
     p = install_deb(lab, args.prev_deb)
     checks.append(Check("previous .deb installs", p.returncode == 0, (p.stdout + p.stderr)[-300:]))
     lab.set_config()
+    # The previous version may not be able to save itself (B-3 in 0.0.1): write the rules file as a
+    # person would have, with a marker rule, and let the daemon load it.
+    marker = 'default = "drop"\n\n[[rule]]\nin = "guest"\nkind = ["query"]\nservice = ["_nothing._tcp"]\n' \
+             'action = "drop"\ncomment = "upgrade-marker"\n'
+    lab.sh("router", f"printf %s {shlex.quote(marker)} > /etc/discowall/rules.toml", check=True)
     lab.restart_daemon()
-    v0 = lab.ctl_json("status")["version"]
-    lab.set_rules(PRINTER_RULES + ["in guest kind query service _nothing._tcp drop comment upgrade-marker"])
-    lab.ctl("save")
+    v0 = deb_version(lab)
+    checks.append(Check("previous version loads the marker rule", "upgrade-marker" in lab.ctl("rule", "list")))
     p = install_deb(lab, args.deb)
     checks.append(Check("new .deb installs over it", p.returncode == 0, (p.stdout + p.stderr)[-300:]))
     lab.restart_daemon()
-    v1 = lab.ctl_json("status")["version"]
-    checks.append(Check("version changed", v0 != v1, f"{v0} -> {v1}"))
+    v1 = deb_version(lab)
+    checks.append(Check("package version changed", v0 != v1, f"{v0} -> {v1}"))
     rules = lab.ctl("rule", "list")
     checks.append(Check("saved rules survived (conffile kept)", "upgrade-marker" in rules, rules[-300:]))
     cfg = lab.out("router", "grep ^interfaces /etc/discowall/discowall.toml").strip()
     checks.append(Check("discowall.toml survived", '"guest"' in cfg, cfg))
     checks.append(Check("unit active after the upgrade", lab.out("router", "systemctl is-active discowalld").strip() == "active"))
+    lab.set_rules(PRINTER_RULES)
+    lab.ctl("save")  # the new version saves through discoctl (B-3)
+    checks.append(Check("new version saves the rules file", "upgrade-marker" not in lab.out("router", "cat /etc/discowall/rules.toml")
+                        and "_ipp._tcp" in lab.out("router", "cat /etc/discowall/rules.toml")))
     lines = browse(lab, "lanhost", "lan")
     checks.append(Check("browse works after the upgrade", any(l.startswith("=;lan;IPv4;") for l in lines)))
     return checks

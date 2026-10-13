@@ -2,8 +2,6 @@
 
 ## Roadmap
 
-- B-2. Dedup drops the IPv4 twin of a query avahi sends on both families at once 🏗️ — [bug-2.md](../roadmap-items/discowall/roadmap/bug-2.md)
-- B-1. Log output carries ANSI colour codes when stdout is not a terminal (journal under systemd) 🏗️ — [bug-1.md](../roadmap-items/discowall/roadmap/bug-1.md)
 - 12. avahi inside the namespace test: publish in one leaf, browse in the other, avahi beside the daemon in the router namespace 🏗️ — [task-12.md](../roadmap-items/discowall/roadmap/task-12.md)
 - 11. Proxmox lab for end-to-end tests: three LXC on a VLAN-aware bridge, lab.py with the nine cases 🏗️ — [task-11.md](../roadmap-items/discowall/roadmap/task-11.md)
 - 9. FreeBSD backend (kqueue, IP_RECVIF) and pfSense package 💤 — [task-9.md](../roadmap-items/discowall/roadmap/task-9.md)
@@ -17,5 +15,8 @@
 
 ## Archive
 
+- B-3. discoctl save fails under the shipped unit: /etc/discowall is read-only for the daemon (ProtectSystem=strict, DynamicUser) ✅ — [bug-3.md](../roadmap-items/discowall/roadmap-archive/bug-3.md)
 - 10. Lab: avahi coexistence on port 5353 (multicast delivery to both, unicast to one) ✅ — [task-10.md](../roadmap-items/discowall/roadmap-archive/task-10.md)
+- B-2. Dedup drops the IPv4 twin of a query avahi sends on both families at once ✅ — [bug-2.md](../roadmap-items/discowall/roadmap-archive/bug-2.md)
+- B-1. Log output carries ANSI colour codes when stdout is not a terminal (journal under systemd) ✅ — [bug-1.md](../roadmap-items/discowall/roadmap-archive/bug-1.md)
 - 1. Concept: rules model, CLI shape and runtime — discuss the research with the maintainer ✅ — [task-1.md](../roadmap-items/discowall/roadmap-archive/task-1.md)

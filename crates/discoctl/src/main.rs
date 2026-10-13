@@ -43,7 +43,7 @@ enum Cmd {
     Ping,
     /// The rule chain.
     Rule(RuleCmd),
-    /// Write the chain to the rules file.
+    /// Write the chain to the rules file (discoctl writes it; the daemon's /etc is read-only).
     Save,
     /// Reload the chain from the rules file.
     Apply,
@@ -236,7 +236,7 @@ fn run(cli: &Cli) -> Result<ExitCode> {
     let req = match &cli.cmd {
         Cmd::Status => Request::Status,
         Cmd::Ping => Request::Ping,
-        Cmd::Save => Request::RuleSave,
+        Cmd::Save => return save(cli),
         Cmd::Apply => Request::RuleApply,
         Cmd::Hosts => Request::Hosts,
         Cmd::Services => Request::Services,
@@ -271,6 +271,7 @@ fn run(cli: &Cli) -> Result<ExitCode> {
         Response::Ok => {}
         Response::Status(s) => print_status(&s),
         Response::Rules(l) => print_rules(&l),
+        Response::RulesToml { toml, .. } => print!("{toml}"),
         Response::Test(t) => print_test(&t),
         Response::Hosts { hosts } => print_hosts(&hosts),
         Response::Services { services } => print_services(&services),
@@ -280,6 +281,33 @@ fn run(cli: &Cli) -> Result<ExitCode> {
             eprintln!("discoctl: {message}");
             return Ok(ExitCode::from(1));
         }
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// `save`: the daemon renders the chain, discoctl writes the file atomically where the daemon
+/// reads it, then tells the daemon. The daemon itself runs sandboxed with a read-only /etc (B-3).
+fn save(cli: &Cli) -> Result<ExitCode> {
+    let (path, toml) = match call(&cli.socket, &Request::RuleDump)? {
+        Response::RulesToml { path, toml } => (PathBuf::from(path), toml),
+        Response::Error { message } => {
+            eprintln!("discoctl: {message}");
+            return Ok(ExitCode::from(1));
+        }
+        other => bail!("unexpected answer to the dump: {other:?}"),
+    };
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+    }
+    let tmp = path.with_extension("toml.tmp");
+    std::fs::write(&tmp, toml).with_context(|| format!("writing {}", tmp.display()))?;
+    std::fs::rename(&tmp, &path).with_context(|| format!("renaming to {}", path.display()))?;
+    let resp = call(&cli.socket, &Request::RuleSaved)?;
+    if cli.json {
+        println!("{}", serde_json::to_string_pretty(&resp)?);
+    } else if let Response::Error { message } = resp {
+        eprintln!("discoctl: {message}");
+        return Ok(ExitCode::from(1));
     }
     Ok(ExitCode::SUCCESS)
 }

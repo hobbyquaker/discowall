@@ -277,8 +277,9 @@ Rust, Aufwandsschätzung, Protokoll der Entscheidungen) steht in
 - 💤 FreeBSD-Backend und pfSense-Paket
 - 🏗️ Proxmox-Lab für End-to-End-Tests (drei LXC an einer VLAN-fähigen Bridge, lab.py)
 - 🏗️ avahi im Namespace-Test auf GitHub
-- 🏗️ B-1: Log-Ausgabe trägt ANSI-Farbcodes im Journal (im Lab gefunden)
-- 🏗️ B-2: Dedup verwirft den IPv4-Zwilling einer Anfrage, die avahi auf beiden Familien zugleich sendet (im Lab gefunden)
+- ✅ B-1: Log-Ausgabe trug ANSI-Farbcodes im Journal (im Lab gefunden und behoben)
+- ✅ B-2: Dedup verwarf den IPv4-Zwilling einer Anfrage, die avahi auf beiden Familien zugleich sendet (im Lab gefunden und behoben)
+- ✅ B-3: `discoctl save` scheiterte unter der mitgelieferten Unit; discoctl schreibt die Regeldatei jetzt selbst (im Lab gefunden und behoben)
 - ✅ Konzept: Regelmodell, CLI, Laufzeit mit dem Maintainer besprochen
 
 🏗️ in Arbeit · 🕵️ gebaut, in Prüfung · ☑️ bereit zur Umsetzung · 🤷 noch zu klären · 💤 später · ✅ erledigt

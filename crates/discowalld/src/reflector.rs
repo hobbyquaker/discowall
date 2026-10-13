@@ -95,11 +95,15 @@ fn load_rules(path: &std::path::Path) -> Result<RuleSet> {
     }
 }
 
-fn save_rules(path: &std::path::Path, set: &RuleSet) -> Result<()> {
-    let text = format!(
+fn render_rules(set: &RuleSet) -> Result<String> {
+    Ok(format!(
         "# discowall rules — written by `discoctl save`; `discoctl apply` reloads it.\n\n{}",
         toml::to_string(set).context("serialising the rules")?
-    );
+    ))
+}
+
+fn save_rules(path: &std::path::Path, set: &RuleSet) -> Result<()> {
+    let text = render_rules(set)?;
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
     }
@@ -1086,6 +1090,24 @@ impl Reflector {
                     message: format!("{e:#}"),
                 },
             },
+            Request::RuleDump => match render_rules(&self.chain.to_set()) {
+                Ok(toml) => Response::RulesToml {
+                    path: self.rules_path.display().to_string(),
+                    toml,
+                },
+                Err(e) => Response::Error {
+                    message: format!("{e:#}"),
+                },
+            },
+            Request::RuleSaved => {
+                self.unsaved = false;
+                info!(
+                    rules = self.chain.rules.len(),
+                    "rules saved to {} by the client",
+                    self.rules_path.display()
+                );
+                Response::Ok
+            }
             Request::RuleApply => {
                 match load_rules(&self.rules_path).and_then(|set| Chain::compile(&set)) {
                     Ok(chain) => {
@@ -1679,9 +1701,26 @@ action = "accept"
             r.handle(Request::RuleDel { index: 9 }),
             Response::Error { .. }
         ));
+        // The client-side save (what discoctl does): dump, write, acknowledge.
+        let Response::RulesToml { path, toml } = r.handle(Request::RuleDump) else {
+            panic!()
+        };
+        assert_eq!(path, d.path.join("rules.toml").display().to_string());
+        assert!(toml.contains("printer*"), "{toml}");
+        let Response::Rules(list) = r.handle(Request::RuleList) else {
+            panic!()
+        };
+        assert!(list.unsaved, "a dump alone does not count as saved");
+        assert_eq!(r.handle(Request::RuleSaved), Response::Ok);
+        let Response::Rules(list) = r.handle(Request::RuleList) else {
+            panic!()
+        };
+        assert!(!list.unsaved);
+        // The daemon-side save, for clients that still ask for it.
         assert_eq!(r.handle(Request::RuleSave), Response::Ok);
         let text = std::fs::read_to_string(d.path.join("rules.toml")).unwrap();
         assert!(text.contains("printer*"), "{text}");
+        assert_eq!(text, toml);
         assert_eq!(r.handle(Request::RuleFlush), Response::Ok);
         let Response::Rules(list) = r.handle(Request::RuleList) else {
             panic!()

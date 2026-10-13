@@ -1,4 +1,4 @@
-## B-1. Log output carries ANSI colour codes when stdout is not a terminal (journal under systemd) 🏗️
+## B-1. Log output carries ANSI colour codes when stdout is not a terminal (journal under systemd) ✅
 
 **Created** 2026-10-13.
 
@@ -8,3 +8,6 @@ journal keeps the bytes; `journalctl` shows them as garbage unless the pager str
 
 **Fix:** `.with_ansi(std::io::stdout().is_terminal())` in `main.rs`; colours stay on when a person runs the
 daemon in a terminal and go off under systemd, in a pipe or a file.
+
+**Fixed** 2026-10-13 (`with_ansi(stdout().is_terminal())`), verified in the lab: case `install` of `tests/lab/lab.py`
+checks the running daemon's journal for escape codes — plain since the 0.0.2-dev build. ✅
