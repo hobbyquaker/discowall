@@ -66,7 +66,8 @@ OpenWrt VM (905) are on the node and stay (see *Cold start*).
   `tests/lab/luci-ui.js` (headless Firefox), `tests/lab/openwrt.md`.
 - **Lab:** two new guests on the node: CT 904 `discowall-sdk` (OpenWrt SDK 24.10.8; 10 GB RAM after an OOM in the
   LLVM build) and VM 905 `discowall-openwrt` (OpenWrt 24.10.8, VLANs 110/120/130 at .2, management over IPv6
-  link-local through the node — the network's DHCP never answered it). `lab.py run --ui --ipk … openwrt`: **36/36**.
+  link-local through the node — the network's DHCP never answered it). `lab.py run --ui --ipk … openwrt`: **36/36**, with
+  both packages built in the SDK (the feed's Rust 1.90.0; Rust host build about 65 min + an OOM'd first try).
   CT 900's daemon is stopped during the case and started again after it.
 - **Found:** OpenWrt zones with input REJECT drop the unicast answers to the proxies (allow UDP from source ports
   1900/5353 — READMEs); the lab's IGMP querier died for iot after the dynamics case (fixed).

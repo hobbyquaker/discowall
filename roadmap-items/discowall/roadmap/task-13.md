@@ -107,7 +107,7 @@ Proxmox lab) — the natural next step of task 11 once the package builds.
 ### Lab run (measured 2026-10-13)
 
 Guests: CT 904 `discowall-sdk` (Debian 13, OpenWrt SDK 24.10.8, 30 GB, 8 cores; memory raised from 4 to 10 GB
-after the first Rust build was OOM-killed) and VM 905 `discowall-openwrt` (OpenWrt 24.10.8 x86-64
+after the first Rust build was OOM-killed, set back to 4 GB once the packages were built) and VM 905 `discowall-openwrt` (OpenWrt 24.10.8 x86-64
 generic-ext4-combined, 512 MB, net0 management + VLANs 110/120/130 as `br-lan`(eth1)/`eth2`/`eth3` at .2, zones
 iot and guest with input REJECT and allow rules for 5353/1900). CT 900's discowalld is stopped while the case runs
 and started again afterwards.
@@ -126,7 +126,10 @@ and started again afterwards.
   position 1 (`proto mdns in eth2 out br-lan kind query service _http._tcp,_ssh._tcp drop (log)`), unsaved banner,
   delete, Save clears the banner, Hosts and services list the iot host and the printer, Settings renders and Save &
   Apply with SSDP off restarts the daemon (uptime 3 s), no JavaScript error on the app's pages.
-- That run's `discowall` ipk was built in a second SDK tree from the static musl binaries of this WSL machine
+- **With the packages as the SDK builds them** (the feed's Rust 1.90.0, `make package/discowall/compile` 1 min
+  46 s after a 65-minute Rust host build, `luci-app-discowall` from the same tree), installed fresh with opkg on the
+  VM: `lab.py run --ui --ipk … openwrt` → **PASS openwrt 36/36 checks** (58.0 s).
+- The first 36/36 run's `discowall` ipk was built in a second SDK tree from the static musl binaries of this WSL machine
   (a scratch Makefile with `Build/Compile` empty, not committed) because the feed's Rust was still compiling;
   `luci-app-discowall` came from the SDK as is. The earlier runs with the files copied by hand: 20/20, 21/21,
   35/35 (the same checks as they were added).
@@ -158,4 +161,5 @@ and started again afterwards.
 - `PKG_HASH:=skip` until a release tarball exists; the luci package's Maintainer field is luci.mk's default.
 - Translations (`po/`) not written.
 
-🕵️ 2026-10-13: built; the VM shows the UI working end to end (36/36). Pending: the package built with the feed's Rust in the SDK (running), OpenWrt 25.12 (see *Open*).
+🕵️ 2026-10-13: built; the VM shows the UI working end to end (36/36). Pending: OpenWrt 25.12 (see *Open*); a real router.
+Later the same day: the packages built with the feed's Rust in the SDK pass the same 36 checks.
