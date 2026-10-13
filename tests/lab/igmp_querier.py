@@ -38,26 +38,27 @@ def main():
     ap.add_argument("-i", "--interval", type=float, default=60.0)
     ap.add_argument("ifaces", nargs="+")
     args = ap.parse_args()
-    socks = []
-    for name in args.ifaces:
-        idx = socket.if_nametoindex(name)
-        s = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_IGMP)
-        s.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 1)
-        # ip_mreqn: group (unused), local address (any), interface index.
-        s.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, struct.pack("4s4si", b"\0\0\0\0", b"\0\0\0\0", idx))
-        # Router Alert option, as IGMP queries carry it (RFC 2236 §2; the kernel builds the IP header).
-        s.setsockopt(socket.IPPROTO_IP, socket.IP_OPTIONS, b"\x94\x04\x00\x00")
-        socks.append((name, s))
     pkt = query_packet()
     print(f"querying every {args.interval:g} s on {', '.join(args.ifaces)}", flush=True)
     while True:
-        for name, s in socks:
+        # A fresh socket per round and interface: the interface may have been re-created since (the
+        # lab's dynamics case hot-unplugs the router's iot interface; a socket bound to the old index
+        # failed with ENODEV from then on and the iot memberships expired, measured 2026-10-13).
+        for name in args.ifaces:
             try:
-                s.sendto(pkt, ("224.0.0.1", 0))
+                with socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_IGMP) as s:
+                    idx = socket.if_nametoindex(name)
+                    s.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 1)
+                    # ip_mreqn: group (unused), local address (any), interface index.
+                    s.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF,
+                                 struct.pack("4s4si", b"\0\0\0\0", b"\0\0\0\0", idx))
+                    # Router Alert option, as IGMP queries carry it (RFC 2236 §2; the kernel builds the
+                    # IP header).
+                    s.setsockopt(socket.IPPROTO_IP, socket.IP_OPTIONS, b"\x94\x04\x00\x00")
+                    s.sendto(pkt, ("224.0.0.1", 0))
             except OSError as e:
                 print(f"{name}: {e}", file=sys.stderr, flush=True)
         time.sleep(args.interval)
-
 
 if __name__ == "__main__":
     main()

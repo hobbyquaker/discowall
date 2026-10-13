@@ -831,6 +831,17 @@ def case_openwrt(lab, args):
         checks.append(Check("lan browses the iot printer through OpenWrt",
                             any(";Lab\\032Printer;" in l and f";{ip4};631;" in l for l in resolved),
                             "\n".join(lines)[-400:]))
+        # SSDP: the search is proxied from an ephemeral socket, minidlna answers it by unicast from
+        # port 1900; a zone with input REJECT needs a rule for that source port (tests/lab/openwrt.md).
+        lab.ensure_minidlna()
+        for r in ({"proto": ["ssdp"], "in": lan, "out": iot, "kind": ["query"], "action": "accept"},
+                  {"proto": ["ssdp"], "in": iot, "out": lan, "kind": ["announce", "response"], "action": "accept"}):
+            ow.ubus("luci.discowall", "rule_add", {"rule": r, "at": 0})
+        out = lab.out("lanhost", "timeout 12 gssdp-discover -i lan -n 4 -t upnp:rootdevice 2>&1", timeout=20)
+        checks.append(Check("lan finds minidlna on iot through OpenWrt (SSDP search proxied)",
+                            f"Location: http://{ip4}:8200/rootDesc.xml" in out, out[-300:]))
+        ow.ubus("luci.discowall", "rule_del", {"index": 6})
+        ow.ubus("luci.discowall", "rule_del", {"index": 5})
         hosts = ow.ubus("luci.discowall", "hosts")[1].get("hosts", [])
         checks.append(Check("luci.discowall hosts knows iothost on the iot device",
                             any(h["host"] == "discowall-iothost.local" and h["iface"] == iot for h in hosts)))
