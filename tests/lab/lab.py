@@ -151,6 +151,9 @@ class Lab:
                               for o in self.nets.values() if o is not n)
             self.sh(n["host"], f"ip route replace 224.0.0.0/4 dev {net}; {others}", check=True)
         self.sh("router", "sysctl -qw net.ipv4.ip_forward=1 net.ipv6.conf.all.forwarding=1", check=True)
+        if self.out("router", "systemctl is-active lab-igmp-querier").strip() != "active":
+            print("  warning: the lab IGMP querier is not running on the router (run `lab.py provision`); "
+                  "SSDP will fail minutes after a daemon start", file=sys.stderr)
 
     def ensure_printer(self):
         """`Lab Printer` (_ipp._tcp on 631) published by avahi on the iot host."""
@@ -167,6 +170,7 @@ class Lab:
 # --- provisioning ------------------------------------------------------------------------------------
 PROBE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "crates", "discowalld", "tests",
                      "mdns_probe.py")
+QUERIER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "igmp_querier.py")
 COMMON_PKGS = "avahi-daemon avahi-utils python3 tcpdump curl dnsutils procps"
 
 
@@ -204,6 +208,14 @@ def provision(lab):
                       "systemctl enable minidlna >/dev/null 2>&1; systemctl restart minidlna", check=True)
     for who in ("lanhost", "iothost", "guesthost"):
         lab.push(who, PROBE, "/root/mdns_probe.py")
+    # The node's bridge snoops IGMP without a querier (README): the router container queries.
+    lab.push("router", QUERIER, "/usr/local/bin/lab-igmp-querier.py")
+    unit = ("[Unit]\nDescription=lab IGMP querier (the Proxmox bridge snoops without a querier)\n"
+            "After=network.target\n[Service]\nExecStart=/usr/bin/python3 /usr/local/bin/lab-igmp-querier.py -i 60 "
+            + " ".join(lab.nets) + "\nRestart=always\n[Install]\nWantedBy=multi-user.target\n")
+    lab.sh("router", f"chmod +x /usr/local/bin/lab-igmp-querier.py; printf %s {shlex.quote(unit)} > "
+                     "/etc/systemd/system/lab-igmp-querier.service; systemctl daemon-reload; "
+                     "systemctl enable --now lab-igmp-querier", check=True)
     lab.ensure_routes()
     print("  provisioned")
 
@@ -444,9 +456,16 @@ def case_ssdp(lab, args):
     lab.set_rules(PRINTER_RULES + SSDP_RULES)
     iot = lab.addr("iot")
     checks = []
+    # The iot side is captured while searching: when the check fails, the detail says whether the
+    # proxied M-SEARCH reached the iot network and whether minidlna answered.
+    lab.bg_start("iothost", "tcpdump", "tcpdump -i iot -n -l udp port 1900")
+    time.sleep(1)
     out = lab.out("lanhost", "timeout 12 gssdp-discover -i lan -n 4 -t upnp:rootdevice 2>&1", timeout=20)
-    checks.append(Check("gssdp-discover on lan finds minidlna (search proxied, answer relayed)",
-                        f"Location: http://{iot}:8200/rootDesc.xml" in out, out[-300:]))
+    time.sleep(1)
+    dump = [l for l in lab.bg_stop("iothost", "tcpdump").splitlines() if "1900" in l]
+    ok = f"Location: http://{iot}:8200/rootDesc.xml" in out
+    checks.append(Check("gssdp-discover on lan finds minidlna (search proxied, answer relayed)", ok,
+                        out[-300:] if ok else f"gssdp: {out[-200:]} || iot wire: " + " ".join(dump[-6:])[-600:]))
     gout = lab.out("guesthost", "timeout 12 gssdp-discover -i guest -n 4 -t ssdp:all 2>&1", timeout=20)
     checks.append(Check("guest finds nothing", "resource available" not in gout, gout[-300:]))
     services = lab.ctl_json("services")["services"]

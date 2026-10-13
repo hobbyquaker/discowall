@@ -26,6 +26,13 @@ lab interface in every container (`allow-interfaces`, `deny-interfaces=eth0`), m
 interface (`224.0.0.0/4 dev <lab-if>`), so nothing leaks into the management network. The hosts route the other
 lab networks through the router, which makes the data path (HTTP from lan to the iot host) testable.
 
+**The bridge snoops without a querier.** Proxmox's `vmbr0` had `multicast_snooping=1` and `multicast_querier=0`
+(measured 2026-10-13); a Linux bridge then drops a port's group membership 260 s after the join unless somebody
+queries. mDNS is exempt (the bridge floods `224.0.0.0/24`), SSDP is not: it worked for a few minutes after every
+daemon start and then stopped — the first intermittent failure the lab produced, and not discowall's. `provision`
+installs `igmp_querier.py` on the router container as the unit `lab-igmp-querier` (a general query every 60 s on
+the lab interfaces), which is what a real network's router or switch does. Task 15 holds the finding for discowall.
+
 ## Setting it up
 
 1. On the node, as root: copy `lab-create.sh` there and run `sh lab-create.sh create`. Defaults: ids 900–903, the

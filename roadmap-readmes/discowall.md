@@ -2,6 +2,7 @@
 
 ## Roadmap
 
+- 15. IGMP snooping without a querier: SSDP dies minutes after start (measured on a Linux bridge) — document, or refresh memberships 🤷 — [task-15.md](../roadmap-items/discowall/roadmap/task-15.md)
 - 14. pfSense package and web UI (and OPNsense plugin?): FreeBSD port, packagegui descriptor, rules page 🤷 — [task-14.md](../roadmap-items/discowall/roadmap/task-14.md)
 - 13. LuCI app for the OpenWrt package: rules, hosts, services and status in the web UI 🤷 — [task-13.md](../roadmap-items/discowall/roadmap/task-13.md)
 - 12. avahi inside the namespace test: publish in one leaf, browse in the other, avahi beside the daemon in the router namespace 🕵️ — [task-12.md](../roadmap-items/discowall/roadmap/task-12.md)
