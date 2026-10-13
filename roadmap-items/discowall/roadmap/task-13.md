@@ -1,4 +1,4 @@
-## 13. LuCI app for the OpenWrt package: rules, hosts, services and status in the web UI ☑️
+## 13. LuCI app for the OpenWrt package: rules, hosts, services and status in the web UI 📥
 
 **Created** 2026-10-13.
 
@@ -65,3 +65,5 @@ Proxmox lab) — the natural next step of task 11 once the package builds.
   lab VLANs, the packages installed with `opkg`/`apk`), `lab.py` gains an `openwrt` target or cases (install, status
   over LuCI's JSON-RPC, a rule added through the UI's rpcd method, browse from the lan host).
 - **Effort:** discoctl half a day, UCI/init one day, app two days, SDK/VM/lab one to two days.
+
+📥 2026-10-13: enqueued in an Opus lane by the coordinator (maintainer: "start a opus lane for task 13 and other ready-to-implement tasks"; task 13 is the only ☑️ item).
