@@ -38,6 +38,22 @@ disk in all. `package/discowall/compile` then took 1 min 46 s. `luci-app-discowa
 put a tarball of it where the Makefile's `PKG_SOURCE` points (`git archive --prefix=discowall-0.0.2/ -o
 <sdk>/dl/discowall-0.0.2.tar.gz HEAD`; `PKG_HASH:=skip` accepts it).
 
+### Packages from the release binaries (task 16)
+
+What the release workflow does, by hand: `contrib/openwrt/build-packages.sh` downloads the SDK of one
+target, packages the release's static binary as `discowall` (`contrib/openwrt/discowall-prebuilt`) and, with
+`--luci`, builds `luci-app-discowall`. No Rust, no `packages` feed for `discowall`:
+
+```sh
+# as the build user, with the three release tarballs in tarballs/
+contrib/openwrt/build-packages.sh -o 24.10.8 -t x86/64 -v 0.0.2 -O out -d tarballs --luci
+contrib/openwrt/build-packages.sh -o 25.12.5 -t mediatek/filogic -v 0.0.2 -O out -d tarballs
+```
+
+Measured 2026-10-13 in the SDK container: about 20 s per architecture for `discowall` (SDK download included),
+about 2.5 min with `--luci` (the `base`, `packages` and `luci` feeds and luci-base's build dependencies).
+The `discowalld` in the package is byte-identical to the one in the release tarball (`STRIP:=:`).
+
 ## The OpenWrt VM (default id 905)
 
 ```sh

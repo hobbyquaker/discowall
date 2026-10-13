@@ -2,15 +2,24 @@ name: Release
 
 # A tag v* builds static musl binaries for three architectures, packs tarballs with the man pages,
 # the unit and the examples, builds .deb and .rpm packages, and attaches everything to the release.
+# Then the OpenWrt SDKs package those binaries as discowall .ipk (24.10) and .apk (25.x) per OpenWrt
+# architecture, plus luci-app-discowall (task 16, D-14, D-15). A manual run with a tag builds only the
+# OpenWrt packages, from the tarballs already on that release, and attaches them to it.
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to attach the OpenWrt packages to (e.g. v0.0.2)"
+        required: true
 
 permissions:
   contents: write
 
 jobs:
   build:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -65,3 +74,71 @@ jobs:
             discowall-*.tar.gz
             discowall_*.deb
             discowall-*.rpm
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tarball-${{ matrix.target }}
+          path: discowall-*.tar.gz
+
+  # One SDK per OpenWrt version and package architecture; no Rust, the package installs the static
+  # binary of the architecture's family (contrib/openwrt/discowall-prebuilt). The SDK is chosen by
+  # target/subtarget; any target of that architecture gives the same package.
+  openwrt:
+    needs: build
+    if: ${{ !cancelled() && (needs.build.result == 'success' || needs.build.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        openwrt: ["24.10.8", "25.12.5"]
+        pkg:
+          - { arch: x86_64, target: x86/64, luci: true }
+          - { arch: aarch64_cortex-a53, target: mediatek/filogic }
+          - { arch: aarch64_cortex-a72, target: bcm27xx/bcm2711 }
+          - { arch: aarch64_generic, target: armsr/armv8 }
+          - { arch: arm_cortex-a7_neon-vfpv4, target: ipq40xx/generic }
+          - { arch: arm_cortex-a8_vfpv3, target: sunxi/cortexa8 }
+          - { arch: arm_cortex-a9, target: bcm53xx/generic }
+          - { arch: arm_cortex-a9_neon, target: imx/cortexa9 }
+          - { arch: arm_cortex-a9_vfpv3-d16, target: mvebu/cortexa9 }
+          - { arch: arm_cortex-a15_neon-vfpv4, target: ipq806x/generic }
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      # The packaging scripts from the workflow's commit, the packaged files from the tag.
+      - uses: actions/checkout@v4
+        with:
+          path: tools
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+          path: src
+      - uses: actions/download-artifact@v4
+        if: github.event_name == 'push'
+        with:
+          pattern: tarball-*
+          merge-multiple: true
+          path: tarballs
+      - name: Tarballs from the release
+        if: github.event_name != 'push'
+        run: gh release download "$TAG" -R "$GITHUB_REPOSITORY" -D tarballs -p 'discowall-*-unknown-linux-musl*.tar.gz'
+      - name: SDK host tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang flex bison g++ gawk gettext git libncurses-dev \
+            libssl-dev python3-setuptools rsync swig unzip zlib1g-dev file wget zstd python3 python3-dev curl
+      - name: Build
+        run: |
+          tools/contrib/openwrt/build-packages.sh -o ${{ matrix.openwrt }} -t ${{ matrix.pkg.target }} \
+            -v "${TAG#v}" -O out -d tarballs -s src -w "$RUNNER_TEMP/sdk" ${{ matrix.pkg.luci && '--luci' || '' }}
+      - name: Check the packages
+        run: |
+          ls -l out
+          for f in out/*.ipk; do
+            [ -e "$f" ] || continue
+            d=$(mktemp -d) && tar -C "$d" -xzf "$f" && tar -C "$d" -xzf "$d/control.tar.gz"
+            grep -E '^(Package|Version|Depends|Architecture):' "$d/control"
+          done
+          for f in out/*.apk; do [ -e "$f" ] || continue; file "$f"; done
+      - name: Attach to the release
+        run: gh release upload "$TAG" out/* -R "$GITHUB_REPOSITORY" --clobber
