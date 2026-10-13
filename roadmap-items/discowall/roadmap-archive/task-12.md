@@ -1,4 +1,4 @@
-## 12. avahi inside the namespace test: publish in one leaf, browse in the other, avahi beside the daemon in the router namespace 🕵️
+## 12. avahi inside the namespace test: publish in one leaf, browse in the other, avahi beside the daemon in the router namespace ✅
 
 **Created** 2026-10-10.
 
@@ -24,3 +24,5 @@ gate). Skips without avahi-daemon/avahi-utils/dbus-daemon. CI installs them (`ci
 **Tested** 2026-10-13 in the lab's lan host container (Debian 13, avahi 0.8, nested user namespaces): both namespace
 tests pass, the avahi one in 12 s. This WSL has no avahi (skips). 🕵️ until the first CI run on GitHub is green
 (the maintainer pushes).
+
+**✅ 2026-10-13:** CI run 38411440694 on master (commit 8fd31cc, version 0.0.2) ran `avahi_between_namespaces … ok` on the GitHub runner with avahi installed by ci.yml — not skipped. Done.
