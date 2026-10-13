@@ -1,4 +1,4 @@
-## 11. Proxmox lab for end-to-end tests: three LXC on a VLAN-aware bridge, lab.py with the nine cases 🏗️
+## 11. Proxmox lab for end-to-end tests: three LXC on a VLAN-aware bridge, lab.py with the nine cases ✅
 
 **Created** 2026-10-10.
 
@@ -29,3 +29,21 @@ session (not maintainer decisions, changeable at any time):**
 - OpenWrt VM: later, when the package is built (unchanged).
 
 🏗️ 2026-10-13: lab being built.
+
+**Built and run 2026-10-13.** `tests/lab/lab-create.sh` (on the node), `tests/lab/lab.py` (nine cases, `list`,
+`provision`, `run --deb/--prev-deb/--soak/--json`), `tests/lab/igmp_querier.py`, `tests/lab/README.md`,
+`tests/lab/lab.toml.example`; the real `lab.toml` and the packages live in `~/.config/discowall-lab/` (D-9).
+
+**Final run** (0.0.2-dev2 build with B-1/B-2/B-3 fixed, upgrade from the v0.0.1 deb, soak 120 s), all green:
+install 10/10 · avahi 8/8 · coexistence 9/9 · legacy 6/6 · ssdp 5/5 · dynamics 8/8 · scale 6/6 · ipv6only 4/4 ·
+upgrade 9/9 (about 7.5 minutes). Against the v0.0.1 release the same harness fails `install` (B-1), `avahi` (B-2),
+`scale` and `upgrade` (B-3) — that is what it was for.
+
+**What the lab found:** B-1, B-2, B-3 (fixed, ✅) and task 15 (IGMP snooping without a querier on the node's bridge;
+the lab runs its own querier now). Harness lessons: flush avahi's cache before every browse or a stale cache fakes a
+pass; a daemon restart reloads the rules file, so set the chain afterwards; dig discards answers from an address other
+than the one it queried (use `dig @router` or the probe); the old version cannot save (B-3), so the upgrade case writes
+the rules file itself; python-zeroconf registers 50 services in parallel only with the async API.
+
+**Not done, deliberately:** the hour-long soak (`--soak 3600`, run it before a release), an OpenWrt VM (task 6's
+package must build first), the manual real-router checklist (research section 4 — the maintainer's). ✅ 2026-10-13.

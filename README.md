@@ -268,7 +268,7 @@ estimate, record of the decisions) is in [mdns-router-research.md](mdns-router-r
 - 💤 nftables sets with the addresses of allowed hosts
 - 🕵️ SSDP (UPnP) as a second protocol
 - 💤 FreeBSD backend and pfSense package
-- 🏗️ Proxmox lab for end-to-end tests (three LXC on a VLAN-aware bridge, lab.py)
+- ✅ Proxmox lab for end-to-end tests (four LXC on a VLAN-aware bridge, lab.py with nine cases, all green 2026-10-13)
 - 🕵️ avahi inside the namespace test on GitHub
 - ✅ B-1: log output carried ANSI colour codes in the journal (found and fixed in the lab)
 - ✅ B-2: dedup dropped the IPv4 twin of a query avahi sends on both families at once (found and fixed in the lab)

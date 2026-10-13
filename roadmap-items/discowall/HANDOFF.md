@@ -2,8 +2,10 @@
 
 The newest five dated entries; older ones move to `handoff-archive/<date>.md`.
 
-**Paused 2026-10-10 after the release of v0.0.1** (maintainer: "wir machen hier erstmal pause"). Everything is
-committed and pushed; the working tree is clean; the next session starts from *Cold start* below.
+**Last session 2026-10-13** (the maintainer: "continue with our roadmap. you may create lxc containers on my proxmox
+for testing"; later "file task: lucy gui for openwrt package. do research for pfsense ui and file another task for
+that"). Everything is committed locally; **nothing pushed** (D-9: the maintainer pushes). The lab containers are
+running on the node and stay (see *Cold start*).
 
 ## Cold start (read this first)
 
@@ -25,20 +27,58 @@ committed and pushed; the working tree is clean; the next session starts from *C
   hickory-proto, `hosts.rs` host table and bundles, `rules.rs` chain/globs/prefixes, `reflector.rs` the core and the
   control handling, `control.rs` unix socket, `tests/netns.rs` + `tests/mdns_probe.py`), `crates/discoctl`,
   `contrib/` (config example, rules example, systemd unit).
-- **State of the items:** 2–6 (P0–P4, the whole v1) and 8 (SSDP) are 🕵️ — green locally and in CI, released as
-  v0.0.1, never on a real router; the release workflow is proven. 10 (lab: avahi coexistence) is ☑️ and needs
-  the lab, 11 (Proxmox lab) 🤷, 12 (avahi in the namespace test) ☑️; 7, 9 are 💤.
-- **Open for the maintainer:** OQ-10 the default policy of a fresh install (the code assumes `drop`); OQ-11 which
-  router and VLANs are the lab; task 11's questions (fresh or real VLAN tags for the Proxmox lab, SSH for
-  sessions to `pct` and the containers, an OpenWrt VM later). A try of v0.0.1 on a router: install the `.deb`,
-  `discoctl status`, rules, a browse from one side, `discoctl watch` — then tasks 2–6 and 8 → ✅.
-- **Where to continue without the maintainer:** task 12 (avahi inside the namespace test, ☑️); then nothing
-  until the lab exists — tasks 7 (nftables sets) and 9 (FreeBSD) are 💤 by decision, not by readiness.
-- **Known gaps worth knowing before the next item:** `records_dropped` and `dropped_link_local` count per target
-  interface, not per packet; the proxy opens one ephemeral socket per legacy query (fine for `dig`, a flood would
-  need a cap); `cargo test -p discowalld` does not rebuild `discoctl` for the namespace test (`cargo build --all`
-  first); the README's Roadmap list is hand-maintained in both languages and must be updated with every
-  `roadmap.py state`; the OpenWrt package is untested; SSDP over IPv6 (ff02::c) is implemented but only v4-tested.
+- **The lab exists** (task 11): four unprivileged Debian 13 LXC containers on the maintainer's Proxmox node —
+  router (discowalld between `lan`/`iot`/`guest`, fresh VLAN tags 110/120/130), a host with avahi per network, minidlna
+  on the iot host as a real UPnP device, an IGMP querier on the router. Built by `tests/lab/lab-create.sh` on the node,
+  driven by `tests/lab/lab.py` over SSH + `pct exec` (nine cases, `lab.py list`), config outside the repo in
+  `~/.config/discowall-lab/lab.toml` (the node's name, ids 900–903 — never written into the repo, D-9), packages in
+  `~/.config/discowall-lab/assets/` (the v0.0.1 deb, locally built `0.0.2~dev*` debs). `tests/lab/README.md` is the
+  manual. The lan host container also runs the namespace tests with real avahi (push the glibc test binary to the same
+  absolute paths; this WSL has no avahi and no passwordless sudo).
+- **State of the items:** 2–6 (P0–P4) and 8 (SSDP) are 🕵️ — v0.0.1 released, and now exercised end to end in the lab
+  by the 0.0.2-dev build (install from the deb, avahi both ways, coexistence, legacy/QU, SSDP with minidlna and
+  gssdp-discover, link/reboot/hot-plug dynamics, 306 rules + 50 services soak, IPv6 only, upgrade 0.0.1 → dev);
+  never on a real router. 10 ✅ (coexistence measured). 11 ✅ (nine cases green on 2026-10-13). 12 🕵️ (avahi inside
+  the namespace test; passes in the lab container, CI run pending the push). B-1, B-2, B-3 ✅ (found and fixed in
+  the lab, see below). 13 (LuCI app), 14 (pfSense package + UI), 15 (IGMP snooping without querier) 🤷 for the
+  maintainer; 7, 9 💤.
+- **Unreleased changes since v0.0.1** (all on `master`, local): B-1 no ANSI codes off a terminal; B-2 dedup keyed per
+  address family (avahi's dual-family queries); B-3 `discoctl save` writes the rules file itself (`RuleDump` +
+  `RuleSaved` in the protocol; the daemon's `/etc` stays read-only under the hardened unit); the avahi namespace test;
+  `ci.yml` installs avahi. The workspace version is still 0.0.1 — a release needs the maintainer's word and a bump.
+- **Open for the maintainer:** OQ-10 (default policy), OQ-11 (which real router); task 13/14 questions (web-ui
+  research note); task 15 (document IGMP snooping, or mitigate); push `master` so CI runs the avahi test; a release
+  with the three fixes (0.0.2) once that is green; try it on a real router (tasks 2–6, 8 → ✅).
+- **Where to continue without the maintainer:** nothing big — the lab's remaining ideas are an OpenWrt VM (needs the
+  OpenWrt package built first) and an hour-long soak (`lab.py run --soak 3600 scale`); task 12 waits for CI.
+- **Known gaps worth knowing:** `records_dropped`/rule hits count per target interface, not per packet; the proxy
+  opens one ephemeral socket per legacy query; `cargo test -p discowalld` does not rebuild `discoctl` (`cargo build
+  --all` first); after a directory rename `touch crates/discowalld/tests/netns.rs` (the test binary embeds absolute
+  paths — cost an hour on 2026-10-13); the README's Roadmap list is hand-maintained in both languages; the OpenWrt
+  package is untested; SSDP over IPv6 is implemented but only v4-tested; the `discowalld --version` string is the
+  workspace version, so dev debs (`--deb-version 0.0.2~dev2`) still say 0.0.1.
+
+## 2026-10-13 — the Proxmox lab built and run, four bugs found and fixed, task 10 measured, tasks 12–15
+
+- **Lab** (task 11): created the four containers with `lab-create.sh` (one fix on the way: no `ip6=auto` on the
+  management interface, ifupdown2 waits forever for DHCPv6), provisioned avahi/gupnp-tools/miniupnpc/minidlna/
+  python-zeroconf, wrote `lab.py` with the nine cases of the research and a lab README. Decisions taken by the session
+  (changeable): fresh VLAN tags, `pct exec` through the node instead of SSH into containers, a fourth container for
+  the guest network.
+- **Found in the lab, fixed, verified there:** B-1 ANSI codes in the journal; B-2 the dedup dropped avahi's IPv4
+  query because its IPv6 twin had the same bytes (the namespace test sends the families 500 ms apart and never saw it);
+  B-3 `discoctl save` impossible under the shipped unit (`ProtectSystem=strict`) — discoctl writes the file now.
+  Fourth finding, not a bug of ours: **task 15** — the node's bridge snoops IGMP without a querier, SSDP memberships
+  expired after 260 s and the `ssdp` case failed whenever it ran a few minutes after a daemon start, while mDNS
+  (224.0.0.0/24, flooded by Linux bridges) never noticed. The lab now runs an IGMP querier on the router.
+- **Task 10 ✅:** coexistence measured (multicast reaches both daemons; unicast to 5353 reaches the socket bound last;
+  avahi's reflector beside discowall causes no storm), research 3.1 marked [measured].
+- **Task 12 🕵️:** `avahi_between_namespaces` — avahi with its own D-Bus in each leaf and beside the daemon in the
+  router namespace; needed a bind-mounted passwd/group with `avahi` as uid 0 (avahi insists its runtime dir belongs to
+  its user). Passes in the lab container; CI installs avahi; waits for the maintainer's push.
+- **Tasks 13, 14, 15 filed** with [notes/web-ui-research.md](notes/web-ui-research.md): LuCI app (client-side JS +
+  a ucode rpcd plugin over `discoctl --json`), pfSense package + UI (two FreeBSD ports, packagegui descriptor, prior
+  art `pfSense-pkg-mDNS-Bridge`; OPNsense plugin as the alternative; blocked by task 9), IGMP snooping.
 
 ## 2026-10-10 (release) — v0.0.1 on GitHub, end-to-end testing proposed
 
@@ -82,18 +122,3 @@ committed and pushed; the working tree is clean; the next session starts from *C
   including the namespace test on the ubuntu runner, release build). Tasks 2 and 3 stay 🕵️ until a real router has
   seen them; after that they are ✅.
 - Session ends here; everything above in *Cold start* is current.
-
-## 2026-10-10 (later) — P0 built: the plain reflector works in network namespaces
-
-- Task 2 is 🕵️: workspace with `discowalld`, `discoctl` and the protocol crate; sockets behind the `MdnsSocket`
-  trait; rtnetlink interface tracking; forward-everything with own-source drop and dedup; control socket with
-  `status`/`ping`; systemd unit; config example; 8 unit tests and the netns integration test (details in the item).
-  Gate green locally; `.github/workflows/ci.yml` written, never run (no remote).
-- **Rust 1.99 is installed** via rustup (`~/.cargo/bin`, not on PATH in non-login shells: `export PATH=$HOME/.cargo/bin:$PATH`).
-- **Assumed, not decided:** OQ-10 default policy `drop` (not used before P1). Nothing else was decided.
-- **Task 3 (P1) is 🕵️:** parser, host table with bundles, rule chain, packet rebuild, rules file with save/apply,
-  `discoctl rule …`/`hosts`/`save`/`apply`, the netns test drives the chain through discoctl and proves the
-  HomeKit scenario (camera dropped, bridge forwarded). 31 tests green, clippy clean. Details in the item.
-- Next: the maintainer creates the GitHub remote and pushes (CI), tries P0 on a router; the P1 lane continues with
-  the host table (research 3.5).
-
