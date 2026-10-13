@@ -250,7 +250,9 @@ def case_install(lab, args):
                                                        for i in st["interfaces"]),
                         json.dumps([(i["name"], i["up"], i["joined_v4"], i["joined_v6"]) for i in st["interfaces"]])))
     checks.append(Check("no send errors", st["counters"]["send_errors"] == 0))
-    journal = lab.out("router", "journalctl -u discowalld -o cat --no-pager | tail -50")
+    # Only the lines of the running process: older ones may be from the version installed before.
+    journal = lab.out("router", "journalctl -u discowalld -o cat --no-pager "
+                                "_PID=$(systemctl show -p MainPID --value discowalld) | tail -50")
     checks.append(Check("journal without WARN/ERROR", not re.search(r"\b(WARN|ERROR)\b", journal),
                         journal[-300:]))
     checks.append(Check("journal plain text (no ANSI codes, B-1)", "\x1b[" not in journal))
@@ -411,7 +413,8 @@ def case_legacy(lab, args):
     # dig to the group discards an answer that does not come from 224.0.0.251 (measured: the answer is on
     # the wire within 2 ms); dig to the router's own address is a unicast legacy query the daemon proxies.
     d = lab.out("lanhost", f"dig +short +time=3 +tries=1 @{rtr} -p 5353 _ipp._tcp.local PTR 2>&1").strip()
-    checks.append(Check("dig @router -p 5353 (unicast legacy query) gets the printer", "Lab Printer._ipp._tcp.local." in d, d))
+    checks.append(Check("dig @router -p 5353 (unicast legacy query) gets the printer",
+                        "Printer._ipp._tcp.local." in d, d))  # dig prints the space as \032
     d = lab.out("lanhost", f"dig +short +time=3 +tries=1 @{rtr} -p 5353 discowall-iothost.local A 2>&1").strip()
     checks.append(Check("dig @router A iothost.local", d == iot, d))
     lab.bg_start("lanhost", "tcpdump", "tcpdump -i lan -n -l udp port 5353")

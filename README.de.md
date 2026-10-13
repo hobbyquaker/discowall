@@ -276,7 +276,7 @@ Rust, Aufwandsschätzung, Protokoll der Entscheidungen) steht in
 - 🕵️ SSDP (UPnP) als zweites Protokoll
 - 💤 FreeBSD-Backend und pfSense-Paket
 - 🏗️ Proxmox-Lab für End-to-End-Tests (drei LXC an einer VLAN-fähigen Bridge, lab.py)
-- ☑️ avahi im Namespace-Test auf GitHub
+- 🏗️ avahi im Namespace-Test auf GitHub
 - 🏗️ B-1: Log-Ausgabe trägt ANSI-Farbcodes im Journal (im Lab gefunden)
 - 🏗️ B-2: Dedup verwirft den IPv4-Zwilling einer Anfrage, die avahi auf beiden Familien zugleich sendet (im Lab gefunden)
 - ✅ Konzept: Regelmodell, CLI, Laufzeit mit dem Maintainer besprochen

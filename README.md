@@ -269,7 +269,7 @@ estimate, record of the decisions) is in [mdns-router-research.md](mdns-router-r
 - 🕵️ SSDP (UPnP) as a second protocol
 - 💤 FreeBSD backend and pfSense package
 - 🏗️ Proxmox lab for end-to-end tests (three LXC on a VLAN-aware bridge, lab.py)
-- ☑️ avahi inside the namespace test on GitHub
+- 🏗️ avahi inside the namespace test on GitHub
 - 🏗️ B-1: log output carries ANSI colour codes in the journal (found in the lab)
 - 🏗️ B-2: dedup drops the IPv4 twin of a query avahi sends on both families at once (found in the lab)
 - ✅ Concept: rule model, CLI and runtime discussed with the maintainer
