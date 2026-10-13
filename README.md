@@ -268,7 +268,7 @@ estimate, record of the decisions) is in [mdns-router-research.md](mdns-router-r
 - 💤 nftables sets with the addresses of allowed hosts
 - 🕵️ SSDP (UPnP) as a second protocol
 - 💤 FreeBSD backend and pfSense package
-- 🤷 Proxmox lab for end-to-end tests (three LXC on a VLAN-aware bridge, lab.py)
+- 🏗️ Proxmox lab for end-to-end tests (three LXC on a VLAN-aware bridge, lab.py)
 - ☑️ avahi inside the namespace test on GitHub
 - ✅ Concept: rule model, CLI and runtime discussed with the maintainer
 
