@@ -2,6 +2,8 @@
 
 ## Roadmap
 
+- 14. pfSense package and web UI (and OPNsense plugin?): FreeBSD port, packagegui descriptor, rules page 🤷 — [task-14.md](../roadmap-items/discowall/roadmap/task-14.md)
+- 13. LuCI app for the OpenWrt package: rules, hosts, services and status in the web UI 🤷 — [task-13.md](../roadmap-items/discowall/roadmap/task-13.md)
 - 12. avahi inside the namespace test: publish in one leaf, browse in the other, avahi beside the daemon in the router namespace 🕵️ — [task-12.md](../roadmap-items/discowall/roadmap/task-12.md)
 - 11. Proxmox lab for end-to-end tests: three LXC on a VLAN-aware bridge, lab.py with the nine cases 🏗️ — [task-11.md](../roadmap-items/discowall/roadmap/task-11.md)
 - 9. FreeBSD backend (kqueue, IP_RECVIF) and pfSense package 💤 — [task-9.md](../roadmap-items/discowall/roadmap/task-9.md)

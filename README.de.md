@@ -280,6 +280,8 @@ Rust, Aufwandsschätzung, Protokoll der Entscheidungen) steht in
 - ✅ B-1: Log-Ausgabe trug ANSI-Farbcodes im Journal (im Lab gefunden und behoben)
 - ✅ B-2: Dedup verwarf den IPv4-Zwilling einer Anfrage, die avahi auf beiden Familien zugleich sendet (im Lab gefunden und behoben)
 - ✅ B-3: `discoctl save` scheiterte unter der mitgelieferten Unit; discoctl schreibt die Regeldatei jetzt selbst (im Lab gefunden und behoben)
+- 🤷 LuCI-App für das OpenWrt-Paket (Web-UI für Regeln, Hosts, Dienste, Status)
+- 🤷 pfSense-Paket und Web-UI (FreeBSD-Port, packagegui, Regelseite; OPNsense-Plugin offen)
 - ✅ Konzept: Regelmodell, CLI, Laufzeit mit dem Maintainer besprochen
 
 🏗️ in Arbeit · 🕵️ gebaut, in Prüfung · ☑️ bereit zur Umsetzung · 🤷 noch zu klären · 💤 später · ✅ erledigt
