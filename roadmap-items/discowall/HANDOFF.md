@@ -38,23 +38,39 @@ OpenWrt VM (905) are on the node and stay (see *Cold start*).
 - **State of the items:** 2–6 (P0–P4) and 8 (SSDP) are 🕵️ — v0.0.1 released, and now exercised end to end in the lab
   by the 0.0.2-dev build (install from the deb, avahi both ways, coexistence, legacy/QU, SSDP with minidlna and
   gssdp-discover, link/reboot/hot-plug dynamics, 306 rules + 50 services soak, IPv6 only, upgrade 0.0.1 → dev);
-  never on a real router. 10 ✅ (coexistence measured). 11 ✅ (nine cases green on 2026-10-13). 12 🕵️ (avahi inside
-  the namespace test; passes in the lab container, CI run pending the push). B-1, B-2, B-3 ✅ (found and fixed in
+  never on a real router. 10 ✅ (coexistence measured). 11 ✅ (nine cases green on 2026-10-13). 12 ✅ (avahi inside the namespace
+  test, green in CI). B-1, B-2, B-3 ✅ (found and fixed in
   the lab, see below). 13 (LuCI app) 🕵️: built and tested on an OpenWrt 24.10.8 VM in the lab (36/36, with the pages in a browser), see its item; 14 (pfSense package + UI), 15 (IGMP snooping without querier) 🤷 for the
   maintainer; 7, 9 💤.
-- **Unreleased changes since v0.0.1** (all on `master`, local): B-1 no ANSI codes off a terminal; B-2 dedup keyed per
-  address family (avahi's dual-family queries); B-3 `discoctl save` writes the rules file itself (`RuleDump` +
-  `RuleSaved` in the protocol; the daemon's `/etc` stays read-only under the hardened unit); the avahi namespace test;
-  `ci.yml` installs avahi. The workspace version is still 0.0.1 — a release needs the maintainer's word and a bump.
+- **Released as v0.0.2 on 2026-10-13:** B-1, B-2, B-3; `discoctl rule add|insert --json`; UCI-rendered OpenWrt config;
+  `luci-app-discowall` (in the repo, not as a release asset — the OpenWrt packages are built with the SDK,
+  `tests/lab/openwrt.md`); the avahi namespace test, run by CI.
 - **Open for the maintainer:** OQ-10 (default policy), OQ-11 (which real router); task 14 questions (web-ui
-  research note); task 15 (document IGMP snooping, or mitigate); push `master` so CI runs the avahi test; a release
-  with the three fixes (0.0.2) once that is green; try it on a real router (tasks 2–6, 8 → ✅).
+  research note); task 15 (document IGMP snooping, or mitigate); try v0.0.2 on a real router (tasks 2–6, 8 → ✅); task 13's two questions
+  (OpenWrt 25.12, firewall rules in the package).
 - **Where to continue without the maintainer:** nothing big — the OpenWrt VM exists now (task 13); an hour-long soak (`lab.py run --soak 3600 scale`); task 12 waits for CI.
 - **Known gaps worth knowing:** `records_dropped`/rule hits count per target interface, not per packet; the proxy
   opens one ephemeral socket per legacy query; `cargo test -p discowalld` does not rebuild `discoctl` (`cargo build
   --all` first); after a directory rename `touch crates/discowalld/tests/netns.rs` (the test binary embeds absolute
   paths — cost an hour on 2026-10-13); the README's Roadmap list is hand-maintained in both languages; SSDP over IPv6 is implemented but only v4-tested; the `discowalld --version` string is the
   workspace version, so dev debs (`--deb-version 0.0.2~dev2`) still say 0.0.1.
+
+## 2026-10-13 (release) — v0.0.2 on GitHub, task 13's LuCI app built and lab-tested, task 12 green in CI
+
+- **Release `v0.0.2`** on the maintainer's word ("release as 0.0.2"): version bumped everywhere (workspace, the two path
+  dependencies, both OpenWrt Makefiles, the lab docs), CI run 38411440694 green on master including the avahi
+  namespace test (task 12 → ✅), tag `v0.0.2` on commit 8fd31cc, release workflow run 38411727663 (see the release
+  for its outcome; notes from the session's draft via `gh release edit`). Fixes B-1, B-2, B-3; new: `discoctl rule
+  add|insert --json`, UCI-rendered OpenWrt config, `luci-app-discowall`, the avahi namespace test.
+- **Task 13 (Opus lane, 🕵️):** discoctl `--json` rules (D-11), UCI → TOML in the procd init (D-10), the LuCI app
+  (D-12, D-13) with a ucode rpcd plugin; tested end to end on an OpenWrt 24.10.8 VM in the lab (case `openwrt`,
+  36/36, packages built by the OpenWrt SDK in CT 904, VM 905). Found: OpenWrt zones that reject input also reject the
+  unicast answers to the proxies — allow UDP from source ports 1900 and 5353 (README, OpenWrt section); the VM gets
+  no DHCP lease on the management network (reached over IPv6 link-local via the node). Open for the maintainer:
+  OpenWrt 25.12 is the newest stable (D-12 says latest stable; the lab is on 24.10), and whether the package ships the
+  firewall rules. Details in `tests/lab/openwrt.md` and the item.
+- **Lab guests now 900–905** (router, three hosts, SDK container, OpenWrt VM), all running; the SDK container has
+  30 GB and 4 GB RAM (10 GB during a Rust toolchain build, ~65 min).
 
 ## 2026-10-13 (Opus lane) — task 13 built: discoctl --json rules, UCI on OpenWrt, luci-app-discowall, OpenWrt VM in the lab
 
@@ -114,19 +130,3 @@ OpenWrt VM (905) are on the node and stay (see *Cold start*).
   tests. The maintainer also asked for a release as **0.0.1** once CI is green (the workspace version is 0.0.1
   now; the tag `v0.0.1` runs the release workflow for the first time) and for research on end-to-end testing in
   his Proxmox environment.
-
-## 2026-10-10 (night) — P2, P3, P4 built; v1 is code-complete, untested on a router
-
-- **Task 4 (P2)** 🕵️: `discoctl watch` (broadcast of per-packet decisions, streamed as JSON lines), `services`,
-  `stats`. **Task 5 (P3)** 🕵️: the legacy-query proxy (ephemeral socket, answers relayed by unicast from 5353),
-  QU bit cleared, link-local address records stripped, IPv6 end to end in the namespace test, a 20 000-packet
-  robustness test of the parser. **Task 6 (P4)** 🕵️: man pages from clap, `.deb`/`.rpm` metadata (built locally
-  from the x86_64 musl binaries), the release workflow (three musl targets with `cross`, tarballs, deb, rpm on a
-  `v*` tag — never run), the OpenWrt package (never built), the READMEs with install, configuration, rules,
-  recipes, discoctl and how-it-works sections. 36 tests, clippy clean, CI green on every push.
-- **The README is English** (`README.md`), German is `README.de.md` (maintainer, 2026-10-10).
-- **The maintainer's next moves:** try it on a router (tasks 2–6 → ✅), decide OQ-10/OQ-11, tag `v0.1.0` to run
-  the release workflow for the first time (expect a fix or two in `cross`/`cargo-generate-rpm` paths), the
-  avahi-coexistence lab check (task 10), the directory rename.
-- **Left for later sessions:** tasks 7 (nftables sets), 8 (SSDP), 9 (FreeBSD/pfSense) are 💤; the dedup against
-  a second reflector and `systemd-analyze security` need a box with avahi and systemd.
