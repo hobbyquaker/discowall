@@ -1,0 +1,37 @@
+# tests/lab/lab.py reads this file; the real one lives outside the repository (D-9), by default at
+# ~/.config/discowall-lab/lab.toml, or where --config points. Everything here must match what
+# lab-create.sh built (the same ids, tags and addresses).
+
+# The Proxmox node, as `ssh` understands it (an alias from ~/.ssh/config is fine). lab.py runs `pct exec`
+# there; the containers need no SSH of their own.
+node = "root@pve.example"
+
+# Where the release assets or a local build are copied from: a directory with discowall_<version>_amd64.deb,
+# or leave empty and pass --deb.
+#deb_dir = "~/Downloads"
+
+[containers]
+router = 900
+lanhost = 901
+iothost = 902
+guesthost = 903
+
+# The lab interfaces as the containers see them, with the VLAN tag and the /24 (10.<tag>.0.0/24) and the
+# /64 (fd00:<tag>::/64) that lab-create.sh derived from it. The router is .1 on each; the hosts as below.
+[networks.lan]
+tag = 110
+host = "lanhost"
+host_addr = "10.110.0.20"
+host_addr6 = "fd00:110::20"
+
+[networks.iot]
+tag = 120
+host = "iothost"
+host_addr = "10.120.0.30"
+host_addr6 = "fd00:120::30"
+
+[networks.guest]
+tag = 130
+host = "guesthost"
+host_addr = "10.130.0.40"
+host_addr6 = "fd00:130::40"

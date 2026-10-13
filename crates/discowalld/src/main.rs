@@ -54,9 +54,11 @@ fn main() -> Result<()> {
     }
     let under_journal = std::env::var_os("JOURNAL_STREAM").is_some();
     let filter = tracing_subscriber::EnvFilter::try_new(&args.log).context("--log")?;
+    // Colours only on a terminal: systemd's journal, a pipe or a file would keep the escape codes.
     let fmt = tracing_subscriber::fmt()
         .with_env_filter(filter)
-        .with_target(false);
+        .with_target(false)
+        .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stdout()));
     if under_journal {
         fmt.without_time().init();
     } else {

@@ -272,7 +272,10 @@ impl Reflector {
             .clear();
     }
 
-    fn is_duplicate(&mut self, data: &[u8]) -> bool {
+    /// The same bytes within the window are a duplicate (a second reflector, a bridge that delivers
+    /// twice) — per address family: avahi sends one query over IPv4 and IPv6 at the same moment, and
+    /// those are two packets, not one (B-2, measured in the lab 2026-10-13).
+    fn is_duplicate(&mut self, data: &[u8], family: Family) -> bool {
         let now = Instant::now();
         if now.duration_since(self.dedup_sweep) > self.dedup_window * 4 {
             let window = self.dedup_window;
@@ -280,6 +283,7 @@ impl Reflector {
             self.dedup_sweep = now;
         }
         let mut h = DefaultHasher::new();
+        matches!(family, Family::V6).hash(&mut h);
         data.hash(&mut h);
         let key = h.finish();
         match self.dedup.get(&key) {
@@ -491,7 +495,7 @@ impl Reflector {
             self.emit(&in_name, &pkt, "own-source".into(), None, vec![]);
             return vec![];
         }
-        if self.is_duplicate(&pkt.data) {
+        if self.is_duplicate(&pkt.data, pkt.family) {
             self.counters.dropped_duplicate += 1;
             debug!(iface = %in_name, src = %pkt.src, "duplicate dropped");
             self.emit(&in_name, &pkt, "duplicate".into(), None, vec![]);
@@ -1491,6 +1495,12 @@ mod tests {
         assert_eq!(r.counters.dropped_own_source, 1);
         assert_eq!(r.on_packet(packet(10, "10.0.0.7", &q)).len(), 2);
         assert!(r.on_packet(packet(12, "10.2.0.9", &q)).is_empty());
+        assert_eq!(r.counters.dropped_duplicate, 1);
+        // The same bytes over IPv6 at the same moment are avahi's second copy, not a duplicate (B-2).
+        let mut twin = packet(10, "10.0.0.7", &q);
+        twin.family = Family::V6;
+        twin.src = SocketAddr::new("fd00:1::7".parse().unwrap(), 5353);
+        r.on_packet(twin);
         assert_eq!(r.counters.dropped_duplicate, 1);
         std::thread::sleep(Duration::from_millis(250));
         assert_eq!(r.on_packet(packet(12, "10.2.0.9", &q)).len(), 2);
