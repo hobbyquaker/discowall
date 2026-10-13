@@ -9,7 +9,7 @@ LUCI_TITLE:=LuCI support for discowall (mDNS/SSDP discovery firewall)
 LUCI_DEPENDS:=+luci-base +discowall
 LUCI_PKGARCH:=all
 
-PKG_VERSION:=0.0.1
+PKG_VERSION:=0.0.2
 PKG_RELEASE:=1
 PKG_LICENSE:=MIT
 PKG_MAINTAINER:=Sebastian Raff <hobbyquaker@gmail.com>

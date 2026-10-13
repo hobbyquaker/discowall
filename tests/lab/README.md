@@ -49,7 +49,7 @@ the lab interfaces), which is what a real network's router or switch does. Task 
 
 ```
 python3 tests/lab/lab.py list                              the cases
-python3 tests/lab/lab.py run --deb discowall_0.0.1_amd64.deb      everything, installing that package first
+python3 tests/lab/lab.py run --deb discowall_0.0.2_amd64.deb      everything, installing that package first
 python3 tests/lab/lab.py run avahi legacy                  two cases against what is installed
 python3 tests/lab/lab.py run --soak 3600 scale             the hour-long soak
 python3 tests/lab/lab.py run --prev-deb old.deb --deb new.deb upgrade

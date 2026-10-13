@@ -27,7 +27,7 @@ cp -r <repo>/contrib/openwrt/discowall <repo>/contrib/openwrt/luci-app-discowall
 make defconfig
 make package/feeds/packages/rust/host/compile -j6     # rustc 1.90.0 and LLVM from source: the long part
 make package/discowall/compile package/luci-app-discowall/compile -j6
-ls bin/packages/x86_64/base/                          # discowall_0.0.1-r1_x86_64.ipk, luci-app-discowall_0.0.1-r1_all.ipk
+ls bin/packages/x86_64/base/                          # discowall_0.0.2-r1_x86_64.ipk, luci-app-discowall_0.0.2-r1_all.ipk
 ```
 
 Measured 2026-10-13: the Rust host build needs more than 4 GB of memory at `-j8` (cc1plus was OOM-killed while
@@ -35,8 +35,8 @@ building LLVM after about 45 minutes); with 10 GB at `-j6` the rest took 65 minu
 disk in all. `package/discowall/compile` then took 1 min 46 s. `luci-app-discowall` needs no Rust, but
 `luci-base`'s build dependencies (`rpcd-mod-luci`, `lucihttp`, `ucode-mod-html`) need the `base` feed's `ucode`,
 `lua` and friends installed — without them the build stops at `ucode/module.h: No such file or directory`. To build the current working tree instead of the release tag,
-put a tarball of it where the Makefile's `PKG_SOURCE` points (`git archive --prefix=discowall-0.0.1/ -o
-<sdk>/dl/discowall-0.0.1.tar.gz HEAD`; `PKG_HASH:=skip` accepts it).
+put a tarball of it where the Makefile's `PKG_SOURCE` points (`git archive --prefix=discowall-0.0.2/ -o
+<sdk>/dl/discowall-0.0.2.tar.gz HEAD`; `PKG_HASH:=skip` accepts it).
 
 ## The OpenWrt VM (default id 905)
 
@@ -105,7 +105,7 @@ found.
 ## Running
 
 ```
-python3 tests/lab/lab.py run --ipk discowall_0.0.1-r1_x86_64.ipk --ipk luci-app-discowall_0.0.1-r1_all.ipk openwrt
+python3 tests/lab/lab.py run --ipk discowall_0.0.2-r1_x86_64.ipk --ipk luci-app-discowall_0.0.2-r1_all.ipk openwrt
 python3 tests/lab/lab.py run --ui openwrt          # the pages in headless Firefox as well (luci-ui.js)
 python3 tests/lab/lab.py run --keep-openwrt openwrt   # leave the VM forwarding afterwards
 ```
