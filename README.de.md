@@ -325,7 +325,7 @@ Rust, Aufwandsschätzung, Protokoll der Entscheidungen) steht in
 - 🕵️ LuCI-App für das OpenWrt-Paket (Web-UI für Regeln, Hosts, Dienste, Status; getestet auf einer OpenWrt-24.10-VM im Labor 2026-10-13)
 - 🤷 pfSense-Paket und Web-UI (FreeBSD-Port, packagegui, Regelseite; OPNsense-Plugin offen)
 - 🤷 IGMP-Snooping ohne Querier lässt SSDP Minuten nach dem Start sterben (an einer Linux-Bridge gemessen): dokumentieren, Mitgliedschaften auffrischen oder selbst Querier sein
-- 📥 OpenWrt-Pakete als Release-Dateien (luci-app `all`, discowall `.ipk`/`.apk` je Architektur aus den musl-Binaries)
+- 🏗️ OpenWrt-Pakete als Release-Dateien (luci-app `all`, discowall `.ipk`/`.apk` je Architektur aus den musl-Binaries)
 - ✅ Konzept: Regelmodell, CLI, Laufzeit mit dem Maintainer besprochen
 
 🏗️ in Arbeit · 🕵️ gebaut, in Prüfung · ☑️ bereit zur Umsetzung · 🤷 noch zu klären · 💤 später · ✅ erledigt

@@ -1,4 +1,4 @@
-## 16. OpenWrt packages as release assets: luci-app-discowall (all) and discowall .ipk/.apk per architecture from the prebuilt musl binaries 📥
+## 16. OpenWrt packages as release assets: luci-app-discowall (all) and discowall .ipk/.apk per architecture from the prebuilt musl binaries 🏗️
 
 **Created** 2026-10-13.
 
