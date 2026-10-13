@@ -23,3 +23,11 @@ Decisions from the Q&A on task 13 (LuCI app) of 2026-10-13; the questions and th
 | D-11 | **`discoctl rule add` and `rule insert` accept `--json <RuleSpec>`** besides the token syntax, so that UIs pass rule objects through instead of building tokens. No protocol change (the protocol already carries `RuleSpec`). |
 | D-12 | **`luci-app-discowall` lives in this repository** under `contrib/openwrt/`, beside the package, built with the OpenWrt SDK; upstreaming to the `openwrt/luci` feed comes after the `discowall` package is in `openwrt/packages`. **Target: the latest stable OpenWrt** — 24.10 today; the target moves with each release. |
 | D-13 | **The LuCI app's rule editor edits live** (every change goes to the daemon at once, as `discoctl` does; Save writes `rules.toml`, Apply reloads it, the unsaved flag is shown) — the iptables-like model of D-5 in the UI. First version: Status, Rules, Hosts and Services views; one ACL group `luci-app-discowall` (admin: read and write). |
+
+Decisions from the Q&A on tasks 13/16 (OpenWrt packaging) of 2026-10-13.
+
+| | Decision (2026-10-13) |
+| --- | --- |
+| D-14 | **OpenWrt packages on every release, unsigned, for local install:** `luci-app-discowall` (`all`) and `discowall` for the architectures the three static musl binaries cover — x86_64; aarch64_cortex-a53, aarch64_cortex-a72, aarch64_generic; arm_cortex-a7_neon-vfpv4, arm_cortex-a9_vfpv3-d16, arm_cortex-a15_neon-vfpv4, arm_cortex-a8_vfpv3, arm_cortex-a9, arm_cortex-a9_neon — one binary per family, `--force-architecture` for the rest, no MIPS (Rust has no tier-2 musl target). Users `opkg install ./file.ipk` (apk: `--allow-untrusted`); a signed package feed would be its own task. |
+| D-15 | **Both package formats:** `.ipk` for OpenWrt 24.10 (opkg) and `.apk` for 25.x, built from the two SDKs in the release workflow. **The lab's OpenWrt VM stays on 24.10 for now**; a 25.12 VM comes with a later lab session (D-12's "latest stable" is the target the packages follow). |
+| D-16 | **The OpenWrt package installs no firewall rules.** Zones are the administrator's; the README and the LuCI settings page say that a zone with input REJECT must accept UDP to and from ports 5353 and 1900 for the proxies' unicast answers. |

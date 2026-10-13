@@ -163,3 +163,5 @@ and started again afterwards.
 
 🕵️ 2026-10-13: built; the VM shows the UI working end to end (36/36). Pending: OpenWrt 25.12 (see *Open*); a real router.
 Later the same day: the packages built with the feed's Rust in the SDK pass the same 36 checks.
+
+**Q&A 2026-10-13 (closing the two open points):** OpenWrt 25.12 → packages for 24.10 and 25.x, the lab VM stays on 24.10 for now (D-15); firewall rules → not installed by the package, documented (D-16).
