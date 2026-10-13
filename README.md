@@ -216,7 +216,8 @@ discoctl stats                  counters per interface and per rule
 discoctl watch [--iface X]      live: one line per packet with its decisions
 ```
 
-Every command takes `--json` for scripts; `--socket` or `DISCOWALL_SOCKET` names the control socket. Exit codes:
+Every command takes `--json` for scripts, and with it `rule add` and `rule insert N` also take the rule as one
+JSON object (`discoctl rule add --json '{"in":"iot","out":"lan","host":["bridge"],"action":"accept"}'`); `--socket` or `DISCOWALL_SOCKET` names the control socket. Exit codes:
 0 ok, 1 the daemon refused, 2 usage, 3 the daemon is unreachable. A `watch` line:
 
 ```

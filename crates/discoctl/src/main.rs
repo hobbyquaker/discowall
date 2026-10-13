@@ -33,7 +33,10 @@ Rule syntax (rule add / rule insert / rule test):
 Every match left out matches everything; a list is any-of. Names are matched without their
 '.local' / '._service._proto.local' tail. Example:
   discoctl rule add in lan out iot kind query service _hap._tcp accept
-  discoctl rule add in iot out lan kind response,announce host bridge accept log";
+  discoctl rule add in iot out lan kind response,announce host bridge accept log
+With --json, rule add / rule insert also take the rule as one JSON object (the RuleSpec of
+the rules file and of `rule list --json`) instead of the words:
+  discoctl rule add --json '{\"in\":\"iot\",\"out\":\"lan\",\"host\":[\"bridge\"],\"action\":\"accept\"}'";
 
 #[derive(Subcommand, Debug)]
 enum Cmd {
@@ -74,12 +77,12 @@ struct RuleCmd {
 enum RuleSub {
     /// List the rules with their hit counters.
     List,
-    /// Append a rule.
+    /// Append a rule (the words, or with --json one JSON object).
     Add {
         #[arg(required = true, trailing_var_arg = true)]
         tokens: Vec<String>,
     },
-    /// Insert a rule before position N (1-based).
+    /// Insert a rule before position N (1-based; the words, or with --json one JSON object).
     Insert {
         n: usize,
         #[arg(required = true, trailing_var_arg = true)]
@@ -193,6 +196,17 @@ fn parse_rule(tokens: &[String]) -> Result<RuleSpec> {
     Ok(spec)
 }
 
+/// The rule of `rule add` / `rule insert`: with `--json` and a single argument that is a JSON
+/// object, that object is the `RuleSpec` (D-11: UIs pass rule objects through); otherwise the words.
+fn rule_arg(tokens: &[String], json: bool) -> Result<RuleSpec> {
+    match tokens {
+        [one] if json && one.trim_start().starts_with('{') => {
+            serde_json::from_str(one).map_err(|e| usage(format!("not a rule object: {e}")))
+        }
+        _ => parse_rule(tokens),
+    }
+}
+
 fn parse_test(tokens: &[String]) -> Result<TestSpec> {
     let mut t = TestSpec::default();
     let mut kind = None;
@@ -246,11 +260,11 @@ fn run(cli: &Cli) -> Result<ExitCode> {
         Cmd::Rule(r) => match &r.cmd {
             RuleSub::List => Request::RuleList,
             RuleSub::Add { tokens } => Request::RuleAdd {
-                rule: parse_rule(tokens)?,
+                rule: rule_arg(tokens, cli.json)?,
                 at: None,
             },
             RuleSub::Insert { n, tokens } => Request::RuleAdd {
-                rule: parse_rule(tokens)?,
+                rule: rule_arg(tokens, cli.json)?,
                 at: Some(*n),
             },
             RuleSub::Del { n } => Request::RuleDel { index: *n },
@@ -563,6 +577,51 @@ mod tests {
         assert!(parse_rule(&toks("in lan bogus accept")).is_err());
         assert!(parse_rule(&toks("kind nope accept")).is_err());
         assert!(parse_rule(&toks("in")).is_err());
+    }
+
+    #[test]
+    fn takes_a_rule_as_json() {
+        let cli = Cli::try_parse_from([
+            "discoctl",
+            "rule",
+            "insert",
+            "2",
+            "--json",
+            r#"{"in":"iot","out":"lan","kind":["response","announce"],"host":["bridge"],"action":"accept","log":true}"#,
+        ])
+        .unwrap();
+        assert!(cli.json);
+        let Cmd::Rule(RuleCmd {
+            cmd: RuleSub::Insert { n, tokens },
+        }) = &cli.cmd
+        else {
+            panic!("{:?}", cli.cmd)
+        };
+        assert_eq!(*n, 2);
+        let r = rule_arg(tokens, cli.json).unwrap();
+        assert_eq!(
+            r,
+            parse_rule(&toks(
+                "in iot out lan kind response,announce host bridge accept log"
+            ))
+            .unwrap()
+        );
+        // The JSON a UI sends round-trips through the RuleSpec the daemon lists.
+        let back = serde_json::to_string(&r).unwrap();
+        assert_eq!(rule_arg(&[back], true).unwrap(), r);
+        // Words still work with --json (only the output is JSON then).
+        assert_eq!(
+            rule_arg(&toks("in lan drop"), true).unwrap().action,
+            Action::Drop
+        );
+        // Without --json an object is not a rule; unknown fields and missing actions are refused.
+        assert!(rule_arg(&[r#"{"action":"accept"}"#.into()], false).is_err());
+        assert!(rule_arg(&[r#"{"action":"accept","bogus":1}"#.into()], true).is_err());
+        assert!(rule_arg(&[r#"{"in":"lan"}"#.into()], true).is_err());
+        let cli =
+            Cli::try_parse_from(["discoctl", "--json", "rule", "add", r#"{"action":"drop"}"#])
+                .unwrap();
+        assert!(cli.json);
     }
 
     #[test]

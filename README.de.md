@@ -219,7 +219,8 @@ discoctl stats                  Zähler je Schnittstelle und je Regel
 discoctl watch [--iface X]      live: eine Zeile pro Paket mit seinen Entscheidungen
 ```
 
-Jeder Befehl kennt `--json` für Skripte; `--socket` oder `DISCOWALL_SOCKET` nennt den Steuer-Socket. Exit-Codes:
+Jeder Befehl kennt `--json` für Skripte, und damit nehmen `rule add` und `rule insert N` die Regel auch als ein
+JSON-Objekt (`discoctl rule add --json '{"in":"iot","out":"lan","host":["bridge"],"action":"accept"}'`); `--socket` oder `DISCOWALL_SOCKET` nennt den Steuer-Socket. Exit-Codes:
 0 ok, 1 der Daemon hat abgelehnt, 2 Bedienfehler, 3 Daemon nicht erreichbar. Eine `watch`-Zeile:
 
 ```
