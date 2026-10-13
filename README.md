@@ -60,8 +60,8 @@ nftables sets, so that exactly one such rule per network pair is enough.
 ## Install
 
 Releases on GitHub carry static binaries for x86_64, aarch64 and armv7 (musl, no dependencies), as a tarball with
-the man pages, the systemd unit and the examples, and as `.deb` and `.rpm` packages. An OpenWrt package
-(`contrib/openwrt/`) is written but not yet built on a real build host.
+the man pages, the systemd unit and the examples, and as `.deb` and `.rpm` packages. For OpenWrt there are two
+packages to build with the OpenWrt SDK (see *OpenWrt* below).
 
 ```sh
 # Debian, Ubuntu, Armbian
@@ -87,6 +87,24 @@ discoctl status
 
 The daemon runs as a dynamic user without capabilities: port 5353 and multicast joins need none. avahi-daemon may
 keep running on the same host; discowall only forwards and never answers for the router itself.
+
+### OpenWrt
+
+`contrib/openwrt/discowall` (the daemon and discoctl, Rust through the packages feed) and
+`contrib/openwrt/luci-app-discowall` (a web UI under *Services → discowall*: status, the rule chain edited
+live with Save and Apply, hosts and services, settings). Copy both into the SDK's `package/` and build them
+(`tests/lab/openwrt.md` has the exact steps, tested with OpenWrt 24.10). On OpenWrt the settings live in UCI:
+
+```sh
+uci add_list discowall.main.interface=br-lan
+uci add_list discowall.main.interface=br-iot      # Linux device names, as the rules name them
+uci commit discowall && /etc/init.d/discowall enable && /etc/init.d/discowall start
+```
+
+The init script renders `/etc/discowall/discowall.toml` from `/etc/config/discowall` (`interface`, `ipv4`,
+`ipv6`, `ssdp`, `rules_file`); the rules stay in `/etc/discowall/rules.toml`. **Firewall:** a zone with input
+`REJECT` must accept UDP to ports 5353 and 1900, and UDP *from* source ports 5353 and 1900 — the answers to the
+searches and one-shot queries the daemon asks on a querier's behalf come back by unicast to an ephemeral port.
 
 ## Configuration
 
@@ -274,7 +292,7 @@ estimate, record of the decisions) is in [mdns-router-research.md](mdns-router-r
 - ✅ B-1: log output carried ANSI colour codes in the journal (found and fixed in the lab)
 - ✅ B-2: dedup dropped the IPv4 twin of a query avahi sends on both families at once (found and fixed in the lab)
 - ✅ B-3: `discoctl save` failed under the shipped unit; discoctl writes the rules file now (found and fixed in the lab)
-- 🏗️ LuCI app for the OpenWrt package (web UI for rules, hosts, services, status; decided 2026-10-13, D-10…D-13)
+- 🕵️ LuCI app for the OpenWrt package (web UI for rules, hosts, services, status; tested on an OpenWrt 24.10 VM in the lab 2026-10-13)
 - 🤷 pfSense package and web UI (FreeBSD port, packagegui, rules page; OPNsense plugin to be decided)
 - 🤷 IGMP snooping without a querier kills SSDP minutes after start (measured on a Linux bridge): document, or refresh memberships, or be the querier
 - ✅ Concept: rule model, CLI and runtime discussed with the maintainer

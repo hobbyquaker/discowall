@@ -1,4 +1,4 @@
-## 13. LuCI app for the OpenWrt package: rules, hosts, services and status in the web UI 🏗️
+## 13. LuCI app for the OpenWrt package: rules, hosts, services and status in the web UI 🕵️
 
 **Created** 2026-10-13.
 
@@ -69,3 +69,93 @@ Proxmox lab) — the natural next step of task 11 once the package builds.
 📥 2026-10-13: enqueued in an Opus lane by the coordinator (maintainer: "start a opus lane for task 13 and other ready-to-implement tasks"; task 13 is the only ☑️ item).
 
 🏗️ 2026-10-13: in progress (Opus lane).
+
+### Built (Opus lane, 2026-10-13)
+
+- **discoctl** (`a2ccfbd`): with `--json`, `rule add` / `rule insert N` take one JSON object as the RuleSpec
+  (`discoctl rule add --json '{"in":"iot","out":"lan","host":["bridge"],"action":"accept"}'`); the words stay the
+  default; `--json` was already the global output flag, so one flag means "JSON in and out". Unit test
+  `takes_a_rule_as_json` (insert at 2, round trip through the listed RuleSpec, words still work, unknown fields and
+  a missing action refused, an object without `--json` refused). Help text and both READMEs.
+- **OpenWrt package** (`f3befb1`): `files/discowall.uci-defaults` creates `/etc/config/discowall` (section
+  `discowall 'main'`: `ipv4`, `ipv6`, `ssdp`, `rules_file`; `list interface` left to the user) unless it exists;
+  `files/discowall.init` renders `/etc/discowall/discowall.toml` from UCI before every start (interfaces checked
+  against `[A-Za-z0-9._@-]`, fewer than two → not started, logged), rewrites the file only when it changed (flash),
+  `procd_set_param file` so that a reload (`reload_config`, LuCI's Save & Apply) restarts the daemon only when
+  the rendered file changed — a reload that changes nothing keeps the live, unsaved chain. Conffiles:
+  `/etc/config/discowall`, `/etc/discowall/rules.toml`. The Makefile now calls `Build/Compile/Cargo` once per
+  crate: `cargo install --path` on the workspace root (what the old default did) cannot install a virtual
+  manifest. Interfaces are Linux device names (`br-lan`, `eth2`), as the rules name them.
+- **luci-app-discowall** (`f3befb1`): Makefile (`LUCI_TITLE`, `LUCI_DEPENDS:=+luci-base +discowall`,
+  `LUCI_PKGARCH:=all`, `include $(TOPDIR)/feeds/luci/luci.mk` — inside the luci feed it would be `../../luci.mk`);
+  `root/usr/share/rpcd/ucode/discowall.uc` (object `luci.discowall`; each method `discoctl --json …` through
+  `popen`, the answer parsed; plain-text failures (daemon unreachable, exit 3) come back as
+  `{"result":"error","message":…,"exit":3}`; `rule_add {rule, at}` passes the object shell-quoted to
+  `rule add|insert --json`); ACL `luci-app-discowall` (read: status, rules, hosts, services, stats + uci
+  discowall; write: rule_add, rule_del, rule_flush, save, apply + uci discowall); menu
+  `admin/services/discowall/{status,rules,hosts,settings}` (depends on the ACL and on the UCI config); views
+  `status.js` (interfaces, counters, poll 5 s), `rules.js` (table with hit counters, modal form with every RuleSpec
+  field — interface dropdowns from `status`, proto/kind checkboxes, action select, log checkbox, comma lists,
+  position — "Insert above" and "Delete" per row, Save, Apply, the unsaved banner), `hosts.js` (hosts and
+  services tables, poll 5 s), `settings.js` (`form.Map('discowall')`, `widgets.DeviceSelect` multiple for the
+  interfaces, ipv4/ipv6/ssdp flags, rules file). A failed poll shows in the banner instead of LuCI's error path.
+- **Lab** (`f3befb1`, `d490aa2`): case `openwrt` in `lab.py` (`--ipk` installs packages on the VM, `--ui` drives
+  the pages in headless Firefox through `tests/lab/luci-ui.js`, `--keep-openwrt`), `[openwrt]` in
+  `lab.toml.example`, [tests/lab/openwrt.md](../../../tests/lab/openwrt.md) with how the SDK container and the VM
+  were built. `igmp_querier.py` reopens its socket per round (see *Found* below).
+
+### Lab run (measured 2026-10-13)
+
+Guests: CT 904 `discowall-sdk` (Debian 13, OpenWrt SDK 24.10.8, 30 GB, 8 cores; memory raised from 4 to 10 GB
+after the first Rust build was OOM-killed) and VM 905 `discowall-openwrt` (OpenWrt 24.10.8 x86-64
+generic-ext4-combined, 512 MB, net0 management + VLANs 110/120/130 as `br-lan`(eth1)/`eth2`/`eth3` at .2, zones
+iot and guest with input REJECT and allow rules for 5353/1900). CT 900's discowalld is stopped while the case runs
+and started again afterwards.
+
+- `lab.py run --ui --ipk discowall_0.0.1-r1_x86_64.ipk --ipk luci-app-discowall_0.0.1-r1_all.ipk openwrt` →
+  **PASS openwrt 36/36 checks** (68.8 s): opkg install; uci-defaults created the config; the init script rendered
+  `interfaces = ["br-lan", "eth2", "eth3"]`; the four views served; `luci.discowall status` over uhttpd's
+  JSON-RPC (`session login`, then `call`) with three interfaces up and joined v4+v6; empty chain → the lan host sees
+  no printer (control: the VM is the only forwarder); four `rule_add` with RuleSpec objects → in `discoctl rule
+  list`; insert at 1 + `rule_del 1`; a bad action → `{"result":"error"}` with exit 2; avahi on the lan host browses
+  and resolves "Lab Printer" on the iot host over IPv4 and IPv6 through the VM; gssdp-discover on lan finds
+  minidlna on iot (search proxied); `hosts` knows the iot host on `eth2`; rule hits counted; `save` writes
+  `rules.toml` and clears `unsaved`; flush + `apply` brings the four rules back; settings written as LuCI does
+  (`uci set`, `uci apply` without rollback) → `ssdp = false` rendered, new daemon PID; the saved chain is back; and
+  in Firefox: login, menu Services → discowall with the four pages, Status rows, a rule added through the modal at
+  position 1 (`proto mdns in eth2 out br-lan kind query service _http._tcp,_ssh._tcp drop (log)`), unsaved banner,
+  delete, Save clears the banner, Hosts and services list the iot host and the printer, Settings renders and Save &
+  Apply with SSDP off restarts the daemon (uptime 3 s), no JavaScript error on the app's pages.
+- That run's `discowall` ipk was built in a second SDK tree from the static musl binaries of this WSL machine
+  (a scratch Makefile with `Build/Compile` empty, not committed) because the feed's Rust was still compiling;
+  `luci-app-discowall` came from the SDK as is. The earlier runs with the files copied by hand: 20/20, 21/21,
+  35/35 (the same checks as they were added).
+
+### Found
+
+- **OpenWrt firewall:** a zone with input REJECT drops the unicast answers to the proxies' ephemeral sockets.
+  Measured: without a rule for UDP from source port 1900 every minidlna answer to a proxied M-SEARCH hit the iot
+  zone's reject counter (3 per search) and gssdp-discover found nothing; with `src_port 1900` accepted it found
+  the device. The same holds for one-shot mDNS queries (answers from 5353). Documented in both READMEs (OpenWrt
+  section) and in `tests/lab/openwrt.md`; the package installs no firewall rules (the zones are the user's).
+- **The lab's IGMP querier** died silently for the iot network after the `dynamics` case re-created CT 900's iot
+  interface (ENODEV every round since); the bridge forgot the iot memberships of 239.255.255.250 and SSDP into iot
+  stopped. Fixed in `igmp_querier.py` (fresh socket per round), pushed to CT 900 and restarted.
+- **Headless Chromium under WSL** never painted a frame (LuCI stayed at "Loading view…"); Firefox from
+  playwright's cache works.
+- The VM got no DHCP lease on the management network (eight DISCOVERs on the bridge, no OFFER); it is reached over
+  IPv6 link-local through the node. Not a discowall matter.
+- The daemon lowercases instance names in its tables (`lab printer._ipp._tcp.local`) — existing behaviour, seen
+  in the Hosts page; noted, not changed.
+
+### Open
+
+- **Version (D-12):** downloads.openwrt.org lists **25.12.5** as the newest stable release (2026-10-13); the Q&A
+  answer named 24.10 and the lab was built with 24.10.8. Per D-12 the target is 25.12 now (apk instead of opkg;
+  the case already uses `apk add --allow-untrusted` when present). For the maintainer: move the lab to 25.12.
+- ACL: tested only with the root login (rpcd gives root every ACL group); a non-root rpcd user with only
+  `luci-app-discowall` was not tried.
+- `PKG_HASH:=skip` until a release tarball exists; the luci package's Maintainer field is luci.mk's default.
+- Translations (`po/`) not written.
+
+🕵️ 2026-10-13: built; the VM shows the UI working end to end (36/36). Pending: the package built with the feed's Rust in the SDK (running), OpenWrt 25.12 (see *Open*).
