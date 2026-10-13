@@ -266,7 +266,7 @@ Rust, Aufwandsschätzung, Protokoll der Entscheidungen) steht in
 
 - 🕵️ **P0:** Cargo-Projekt, Sockets, Schnittstellen-Überwachung per Netlink, einfacher Reflector mit
   Schleifenschutz, systemd-Unit
-- ☑️ **Lab:** Koexistenz mit avahi-daemon auf Port 5353 messen
+- ✅ **Lab:** Koexistenz mit avahi-daemon auf Port 5353 messen (gemessen 2026-10-13: Multicast an beide, Unicast an den zuletzt gebundenen Socket, kein Sturm)
 - 🕵️ **P1:** Parser, Host-Tabelle und Record-Bündel, Regelkette, Steuer-Socket, `discoctl rule …`
 - 🕵️ **P2:** `discoctl watch`, `hosts`, `services`, `stats`, `status`; Zähler pro Regel, `log`
 - 🕵️ **P3:** Stellvertreter für einmalige Anfragen und das QU-Bit, Link-local-AAAA entfernen, IPv6 durchgehend,

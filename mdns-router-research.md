@@ -120,8 +120,18 @@ OQ-2.
   works (that is how avahi and systemd-resolved coexist); **unicast** to 5353 (legacy-query responses, QU answers)
   reaches only one of them. If the daemon shares a host with avahi, it must not depend on receiving unicast on 5353 —
   the legacy-query proxy (3.7) then uses an ephemeral port for its own questions, which is correct anyway. Avahi's
-  `disallow-other-stacks=yes` would block the bind; it defaults to `no`. **To verify in the lab** before D-n; the
+  `disallow-other-stacks=yes` would block the bind; it defaults to `no`. The
   FreeBSD report that `SO_REUSEPORT` is not enough is not Linux.
+  **[measured 2026-10-13, task 10, Proxmox lab: Debian 13 LXC, kernel 7.0 of the PVE 9.2 host, avahi 0.8, discowalld
+  0.0.2-dev; `tests/lab/lab.py run coexistence`]** Both daemons bind `0.0.0.0:5353` and `[::]:5353` side by side.
+  (1) Multicast reaches both: avahi on the router answers `router.local` while discowall forwards the browse of a
+  printer from the other interface. (2) Unicast to port 5353 reaches **the socket bound last** — with discowalld
+  restarted after avahi, a unicast query from an ephemeral port and one from port 5353 both show up in `discoctl
+  watch` and avahi does not answer; with avahi restarted after discowalld, avahi answers and discowall sees nothing.
+  So the proxy's ephemeral socket is the right design (3.7); a reboot order must never matter, and it does not.
+  (3) avahi's own reflector on as well (`enable-reflector=yes`): no storm — 8 packets on the lan interface in 10 s
+  around a fresh announcement and a browse; avahi's copies carry the router's source address and fall to
+  discowall's own-source drop, the rest to the dedup window; the printer still browses.
 - **Interfaces** are named in the config (`lan`, `iot`, `guest`); the daemon watches **rtnetlink** for link and address
   changes, joins the groups when an interface appears or comes up, leaves when it goes, and keeps its own address
   list current (needed for the loop check). An interface that does not exist yet is fine: configured, waiting.
