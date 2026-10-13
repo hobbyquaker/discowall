@@ -273,7 +273,7 @@ estimate, record of the decisions) is in [mdns-router-research.md](mdns-router-r
 - ✅ B-1: log output carried ANSI colour codes in the journal (found and fixed in the lab)
 - ✅ B-2: dedup dropped the IPv4 twin of a query avahi sends on both families at once (found and fixed in the lab)
 - ✅ B-3: `discoctl save` failed under the shipped unit; discoctl writes the rules file now (found and fixed in the lab)
-- 📥 LuCI app for the OpenWrt package (web UI for rules, hosts, services, status; decided 2026-10-13, D-10…D-13)
+- 🏗️ LuCI app for the OpenWrt package (web UI for rules, hosts, services, status; decided 2026-10-13, D-10…D-13)
 - 🤷 pfSense package and web UI (FreeBSD port, packagegui, rules page; OPNsense plugin to be decided)
 - 🤷 IGMP snooping without a querier kills SSDP minutes after start (measured on a Linux bridge): document, or refresh memberships, or be the querier
 - ✅ Concept: rule model, CLI and runtime discussed with the maintainer
