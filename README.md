@@ -269,7 +269,7 @@ estimate, record of the decisions) is in [mdns-router-research.md](mdns-router-r
 - 🕵️ SSDP (UPnP) as a second protocol
 - 💤 FreeBSD backend and pfSense package
 - 🏗️ Proxmox lab for end-to-end tests (three LXC on a VLAN-aware bridge, lab.py)
-- 🏗️ avahi inside the namespace test on GitHub
+- 🕵️ avahi inside the namespace test on GitHub
 - ✅ B-1: log output carried ANSI colour codes in the journal (found and fixed in the lab)
 - ✅ B-2: dedup dropped the IPv4 twin of a query avahi sends on both families at once (found and fixed in the lab)
 - ✅ B-3: `discoctl save` failed under the shipped unit; discoctl writes the rules file now (found and fixed in the lab)
