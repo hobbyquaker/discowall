@@ -1,0 +1,49 @@
+{
+	"admin/services/discowall": {
+		"title": "discowall",
+		"order": 60,
+		"action": {
+			"type": "firstchild"
+		},
+		"depends": {
+			"acl": [ "luci-app-discowall" ],
+			"uci": { "discowall": true }
+		}
+	},
+
+	"admin/services/discowall/status": {
+		"title": "Status",
+		"order": 1,
+		"action": {
+			"type": "view",
+			"path": "discowall/status"
+		}
+	},
+
+	"admin/services/discowall/rules": {
+		"title": "Rules",
+		"order": 2,
+		"action": {
+			"type": "view",
+			"path": "discowall/rules"
+		}
+	},
+
+	"admin/services/discowall/hosts": {
+		"title": "Hosts and services",
+		"order": 3,
+		"action": {
+			"type": "view",
+			"path": "discowall/hosts"
+		}
+	},
+
+	"admin/services/discowall/settings": {
+		"title": "Settings",
+		"order": 4,
+		"action": {
+			"type": "view",
+			"path": "discowall/settings"
+		}
+	}
+}

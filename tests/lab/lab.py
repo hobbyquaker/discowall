@@ -9,6 +9,7 @@ the node's name live outside the repository in lab.toml (lab.toml.example is the
 
   lab.py [--config lab.toml] provision             install the peers in freshly created containers
   lab.py [--config lab.toml] run [--deb X.deb] [--prev-deb Y.deb] [--soak N] [--json out.json] [CASE ...]
+  lab.py run --ipk discowall_X.ipk --ipk luci-app-discowall_X.ipk openwrt     the OpenWrt VM (task 13)
   lab.py list                                      the cases
 
 Every case leaves the lab in a state the next case can use; a failing check does not stop the case. The
@@ -668,6 +669,211 @@ def case_upgrade(lab, args):
     return checks
 
 
+# --- OpenWrt (task 13) -----------------------------------------------------------------------------------
+class OpenWrt:
+    """The OpenWrt VM of [openwrt] in lab.toml: SSH through the node (ProxyJump), HTTP from the node."""
+
+    def __init__(self, lab):
+        self.lab = lab
+        self.cfg = lab.cfg["openwrt"]
+        self.dest = self.cfg["ssh"]
+        self.http = self.cfg.get("http", "")
+        self.ifaces = self.cfg["interfaces"]  # lab network name -> the router's device name
+        self.session = None
+
+    def ssh_args(self):
+        return ["ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
+                "-o", "LogLevel=ERROR", "-J", self.lab.node, self.dest]
+
+    def sh(self, script, timeout=120, check=False):
+        if self.lab.verbose:
+            print(f"    openwrt$ {script[:160]}", file=sys.stderr)
+        p = subprocess.run(self.ssh_args() + [script], capture_output=True, text=True, timeout=timeout)
+        if check and p.returncode != 0:
+            raise RuntimeError(f"openwrt: {script}\n{p.stdout}{p.stderr}")
+        return p
+
+    def push(self, local, remote):
+        with open(local, "rb") as f:
+            subprocess.run(self.ssh_args() + [f"cat > {shlex.quote(remote)}"], stdin=f, check=True, timeout=120)
+
+    def ubus(self, obj, method, params=None):
+        """One call through uhttpd's JSON-RPC endpoint (/ubus), as LuCI's rpc.js makes it."""
+        if self.session is None:
+            pw = open(os.path.expanduser(self.cfg["password_file"])).read().strip()
+            r = self._post("session", "login", {"username": "root", "password": pw},
+                           sid="00000000000000000000000000000000")
+            self.session = r[1]["ubus_rpc_session"]
+        return self._post(obj, method, params or {})
+
+    def _post(self, obj, method, params, sid=None):
+        body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "call",
+                           "params": [sid or self.session, obj, method, params]})
+        p = self.lab.node_sh(f"curl -sg --max-time 20 -H 'Content-Type: application/json' "
+                             f"--data-binary {shlex.quote(body)} {shlex.quote(self.http + '/ubus')}")
+        r = json.loads(p.stdout)
+        if "error" in r:
+            raise RuntimeError(f"ubus {obj}.{method}: {r['error']}")
+        return r["result"]  # [status, data]
+
+    def get(self, path):
+        """HTTP status of a URL path on the router's web server, fetched from the node."""
+        return self.lab.node_sh(f"curl -sg -o /dev/null -w '%{{http_code}}' --max-time 10 "
+                                f"{shlex.quote(self.http + path)}").stdout.strip()
+
+
+LUCI_UI = os.path.join(os.path.dirname(os.path.abspath(__file__)), "luci-ui.js")
+
+
+def luci_ui(lab, ow):
+    """The browser half: luci-ui.js in headless Firefox, through an SSH tunnel to the VM's web server."""
+    cfg = ow.cfg
+    if not cfg.get("ui_node_path") or not cfg.get("ui_firefox"):
+        return [Check("LuCI in a browser", False, "set ui_node_path and ui_firefox in [openwrt]")]
+    lab.ensure_printer()
+    browse(lab, "lanhost", "lan")  # fresh host and service entries for the Hosts page
+    host = re.sub(r"^http://\[?|\]?$", "", cfg["http"]).replace("%25", "%")
+    port = 18000 + os.getpid() % 1000
+    tunnel = subprocess.Popen(["ssh", "-o", "BatchMode=yes", "-o", "ExitOnForwardFailure=yes", "-N",
+                               "-L", f"{port}:[{host}]:80", lab.node])
+    shots = os.path.expanduser(cfg.get("ui_screenshots", "/tmp/discowall-luci-ui"))
+    os.makedirs(shots, exist_ok=True)
+    try:
+        time.sleep(2)
+        env = dict(os.environ, NODE_PATH=os.path.expanduser(cfg["ui_node_path"]),
+                   FF=os.path.expanduser(cfg["ui_firefox"]))
+        p = subprocess.run(["node", LUCI_UI, f"http://127.0.0.1:{port}", os.path.expanduser(cfg["password_file"]),
+                            shots], capture_output=True, text=True, timeout=600, env=env)
+    finally:
+        tunnel.terminate()
+    out = p.stdout
+    try:
+        results = json.loads(out[out.index("["):out.rindex("]") + 1])
+    except ValueError:
+        return [Check("LuCI in a browser", False, (p.stdout + p.stderr)[-400:])]
+    checks = [Check("browser: " + r["name"], r["ok"], r["detail"]) for r in results]
+    if p.returncode != 0 and all(c.ok for c in checks):
+        checks.append(Check("browser: script finished", False, p.stderr[-400:]))
+    return checks
+
+
+def case_openwrt(lab, args):
+    """13. OpenWrt VM: packages, UCI -> TOML, LuCI's rpcd object and views, a browse through the VM."""
+    if "openwrt" not in lab.cfg:
+        return [Check("skipped", True, "no [openwrt] in lab.toml")]
+    ow = OpenWrt(lab)
+    checks = []
+    for ipk in args.ipk or []:
+        remote = "/tmp/" + os.path.basename(ipk)
+        ow.push(ipk, remote)
+    if args.ipk:
+        names = " ".join("/tmp/" + os.path.basename(i) for i in args.ipk)
+        p = ow.sh(f"if [ -x /usr/bin/apk ]; then apk add --allow-untrusted {names}; "
+                  f"else opkg install --force-reinstall {names}; fi", timeout=300)
+        checks.append(Check("packages install", p.returncode == 0, (p.stdout + p.stderr)[-300:]))
+    checks.append(Check("uci-defaults created /etc/config/discowall",
+                        ow.sh("uci -q get discowall.main").stdout.strip() == "discowall"))
+
+    # One forwarder on the lab VLANs: the LXC router's daemon stops while the VM forwards.
+    lab.sh("router", "systemctl stop discowalld", check=True)
+    try:
+        devs = [ow.ifaces[n] for n in ("lan", "iot", "guest")]
+        ow.sh("uci -q delete discowall.main.interface; "
+              + " ".join(f"uci add_list discowall.main.interface={d};" for d in devs)
+              + " uci set discowall.main.ssdp=1; uci commit discowall; /etc/init.d/discowall enable; "
+                "/etc/init.d/discowall restart; sleep 2", check=True)
+        toml = ow.sh("cat /etc/discowall/discowall.toml").stdout
+        want = "interfaces = [" + ", ".join(f'"{d}"' for d in devs) + "]"
+        checks.append(Check("init script rendered discowall.toml from UCI", want in toml and "ssdp = true" in toml, toml))
+
+        # LuCI: the views and the menu are served, the rpcd object answers.
+        for v in ("status", "rules", "hosts", "settings"):
+            code = ow.get(f"/luci-static/resources/view/discowall/{v}.js")
+            checks.append(Check(f"view {v}.js served", code == "200", code))
+        st = ow.ubus("luci.discowall", "status")
+        ok = st[0] == 0 and st[1].get("result") == "status"
+        ifs = st[1].get("interfaces", []) if ok else []
+        checks.append(Check("luci.discowall status over JSON-RPC", ok and {i["name"] for i in ifs} == set(devs),
+                            json.dumps(st)[:300]))
+        checks.append(Check("three interfaces up and joined", ifs and all(i["up"] and i["joined_v4"] for i in ifs),
+                            json.dumps([(i["name"], i["up"], i["joined_v4"], i["joined_v6"]) for i in ifs])))
+        ow.ubus("luci.discowall", "rule_flush")
+        lab.ensure_printer()
+        lines = browse(lab, "lanhost", "lan", timeout=5)
+        checks.append(Check("empty chain: lan sees no printer (the VM is the only forwarder)",
+                            not any("Lab\\032Printer" in l for l in lines), "\n".join(lines)[-300:]))
+        lan, iot = ow.ifaces["lan"], ow.ifaces["iot"]
+        rules = [
+            {"in": lan, "out": iot, "kind": ["query"], "service": ["_ipp._tcp"], "action": "accept"},
+            {"in": iot, "out": lan, "kind": ["response", "announce"], "service": ["_ipp._tcp"], "action": "accept"},
+            {"in": lan, "out": iot, "kind": ["query"], "rrtype": ["A", "AAAA"], "action": "accept"},
+            {"in": iot, "out": lan, "kind": ["response"], "host": ["discowall-iothost"], "action": "accept",
+             "comment": "added through rpcd"},
+        ]
+        added = [ow.ubus("luci.discowall", "rule_add", {"rule": r, "at": 0}) for r in rules]
+        checks.append(Check("rule_add x4 through rpcd", all(a[0] == 0 and a[1].get("result") == "ok" for a in added),
+                            json.dumps(added)[:300]))
+        ins = ow.ubus("luci.discowall", "rule_add", {"rule": {"src": ["192.0.2.0/24"], "action": "drop"}, "at": 1})
+        listing = ow.sh("discoctl rule list").stdout
+        checks.append(Check("rules show in discoctl rule list", "added through rpcd" in listing
+                            and listing.count("\n") >= 6 and "src 192.0.2.0/24 drop" in listing.splitlines()[1],
+                            listing))
+        d = ow.ubus("luci.discowall", "rule_del", {"index": 1})
+        rl = ow.ubus("luci.discowall", "rules")[1]
+        checks.append(Check("insert at 1 and rule_del 1", ins[1].get("result") == "ok" and d[1].get("result") == "ok"
+                            and len(rl.get("rules", [])) == 4 and rl.get("unsaved") is True, json.dumps(rl)[:300]))
+        bad = ow.ubus("luci.discowall", "rule_add", {"rule": {"in": lan, "action": "maybe"}})
+        checks.append(Check("a bad rule comes back as an error", bad[1].get("result") == "error", json.dumps(bad)))
+
+        lines = browse(lab, "lanhost", "lan")
+        ip4 = lab.addr("iot")
+        resolved = [l for l in lines if l.startswith("=;lan;")]
+        checks.append(Check("lan browses the iot printer through OpenWrt",
+                            any(";Lab\\032Printer;" in l and f";{ip4};631;" in l for l in resolved),
+                            "\n".join(lines)[-400:]))
+        hosts = ow.ubus("luci.discowall", "hosts")[1].get("hosts", [])
+        checks.append(Check("luci.discowall hosts knows iothost on the iot device",
+                            any(h["host"] == "discowall-iothost.local" and h["iface"] == iot for h in hosts)))
+        stats = ow.ubus("luci.discowall", "stats")[1]
+        hits = [r["hits"] for r in stats.get("rules", [])]
+        checks.append(Check("rule hit counters count", sum(hits) > 0, str(hits)))
+
+        sv = ow.ubus("luci.discowall", "save")
+        saved = ow.sh("cat /etc/discowall/rules.toml").stdout
+        rl = ow.ubus("luci.discowall", "rules")[1]
+        checks.append(Check("save writes rules.toml", sv[1].get("result") == "ok" and "added through rpcd" in saved
+                            and rl.get("unsaved") is False, saved[-200:]))
+        ow.ubus("luci.discowall", "rule_flush")
+        ap = ow.ubus("luci.discowall", "apply")
+        rl = ow.ubus("luci.discowall", "rules")[1]
+        checks.append(Check("apply reloads the file", ap[1].get("result") == "ok" and len(rl.get("rules", [])) == 4))
+
+        # Settings as LuCI writes them: uci set, then uci apply (LuCI's "Save & Apply" without rollback;
+        # `uci commit` is in no ACL), procd's reload trigger re-renders the file and restarts the daemon.
+        pid = ow.sh("pidof discowalld").stdout.strip()
+        ow.ubus("uci", "set", {"config": "discowall", "section": "main", "values": {"ssdp": "0"}})
+        ow.ubus("uci", "apply", {"rollback": False})
+        time.sleep(3)
+        toml = ow.sh("cat /etc/discowall/discowall.toml").stdout
+        pid2 = ow.sh("pidof discowalld").stdout.strip()
+        checks.append(Check("settings saved over ubus: rendered and restarted", "ssdp = false" in toml and pid2
+                            and pid2 != pid, f"pid {pid} -> {pid2}; {toml}"))
+        ow.ubus("uci", "set", {"config": "discowall", "section": "main", "values": {"ssdp": "1"}})
+        ow.ubus("uci", "apply", {"rollback": False})
+        time.sleep(3)
+        rl = ow.ubus("luci.discowall", "rules")[1]
+        checks.append(Check("the saved chain is back after the restart", len(rl.get("rules", [])) == 4))
+        if args.ui:
+            checks += luci_ui(lab, ow)
+        log = ow.sh("logread -e discowall | tail -20").stdout
+        checks.append(Check("syslog without ERROR", "ERROR" not in log, log[-300:]))
+    finally:
+        if not args.keep_openwrt:
+            ow.sh("/etc/init.d/discowall stop; /etc/init.d/discowall disable")
+            lab.sh("router", "systemctl start discowalld")
+    return checks
+
+
 CASES = [
     ("install", case_install),
     ("avahi", case_avahi),
@@ -678,6 +884,7 @@ CASES = [
     ("scale", case_scale),
     ("ipv6only", case_ipv6only),
     ("upgrade", case_upgrade),
+    ("openwrt", case_openwrt),
 ]
 
 
@@ -705,6 +912,12 @@ def main():
     run.add_argument("--prev-deb", help="the previous .deb (case upgrade)")
     run.add_argument("--soak", type=int, default=60, help="seconds for the scale case (default 60)")
     run.add_argument("--json", help="write the checks to this file")
+    run.add_argument("--ipk", action="append", help="an OpenWrt package to install on the VM first (case openwrt; "
+                                                     "repeatable: discowall, luci-app-discowall)")
+    run.add_argument("--ui", action="store_true",
+                     help="case openwrt also drives the LuCI pages in headless Firefox (tests/lab/luci-ui.js)")
+    run.add_argument("--keep-openwrt", action="store_true",
+                     help="leave discowalld running on the VM and stopped on the LXC router after case openwrt")
     run.add_argument("cases", nargs="*", help="which cases (default: all)")
     args = ap.parse_args()
 
@@ -723,6 +936,10 @@ def main():
             if not os.path.exists(v):
                 sys.exit(f"{v}: not found")
             setattr(args, a, v)
+    args.ipk = [os.path.expanduser(i) for i in args.ipk or []]
+    for i in args.ipk:
+        if not os.path.exists(i):
+            sys.exit(f"{i}: not found")
     wanted = args.cases or [n for n, _ in CASES]
     unknown = [c for c in wanted if c not in dict(CASES)]
     if unknown:

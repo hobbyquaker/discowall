@@ -1,0 +1,14 @@
+#!/bin/sh
+# First install: create /etc/config/discowall with the section `main` (D-10). An existing
+# configuration is left alone.
+[ -n "$(uci -q get discowall.main)" ] && exit 0
+touch /etc/config/discowall
+uci -q batch <<-UCI
+	set discowall.main=discowall
+	set discowall.main.ipv4='1'
+	set discowall.main.ipv6='1'
+	set discowall.main.ssdp='1'
+	set discowall.main.rules_file='/etc/discowall/rules.toml'
+	commit discowall
+UCI
+exit 0

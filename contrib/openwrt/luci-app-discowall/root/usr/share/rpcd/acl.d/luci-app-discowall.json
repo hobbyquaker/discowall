@@ -1,0 +1,17 @@
+{
+	"luci-app-discowall": {
+		"description": "Grant access to discowall: status, rules, hosts and services, the rule editor and the settings",
+		"read": {
+			"ubus": {
+				"luci.discowall": [ "status", "rules", "hosts", "services", "stats" ]
+			},
+			"uci": [ "discowall" ]
+		},
+		"write": {
+			"ubus": {
+				"luci.discowall": [ "rule_add", "rule_del", "rule_flush", "save", "apply" ]
+			},
+			"uci": [ "discowall" ]
+		}
+	}
+}

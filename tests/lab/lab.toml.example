@@ -35,3 +35,25 @@ tag = 130
 host = "guesthost"
 host_addr = "10.130.0.40"
 host_addr6 = "fd00:130::40"
+
+# Optional (case `openwrt`, task 13): an OpenWrt VM with one NIC per lab network, addresses .2 so it
+# does not collide with the LXC router; tests/lab/openwrt.md describes how it was built. `ssh` is
+# reached through the node (ProxyJump), `http` is fetched with curl on the node (an IPv6 link-local
+# address needs the zone, `%25<bridge>` in the URL). `password_file` holds the VM's root password
+# (the LuCI login), outside the repository.
+#[openwrt]
+#vm = 905
+#sdk = 904
+#ssh = "root@fe80::xxxx:xxxx:xxxx:xxxx%vmbr0"
+#http = "http://[fe80::xxxx:xxxx:xxxx:xxxx%25vmbr0]"
+#password_file = "~/.config/discowall-lab/openwrt-root-password"
+# For `run --ui openwrt` (tests/lab/luci-ui.js): a node_modules directory with playwright-core and a
+# Firefox executable (playwright's own build works); screenshots go to ui_screenshots.
+#ui_node_path = "~/some-project/node_modules"
+#ui_firefox = "~/.cache/ms-playwright/firefox-NNNN/firefox/firefox"
+#ui_screenshots = "/tmp/discowall-luci-ui"
+#
+#[openwrt.interfaces]       # lab network -> the OpenWrt device that carries it
+#lan = "br-lan"
+#iot = "eth2"
+#guest = "eth3"
