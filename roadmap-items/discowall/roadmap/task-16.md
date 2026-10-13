@@ -1,4 +1,4 @@
-## 16. OpenWrt packages as release assets: luci-app-discowall (all) and discowall .ipk/.apk per architecture from the prebuilt musl binaries ☑️
+## 16. OpenWrt packages as release assets: luci-app-discowall (all) and discowall .ipk/.apk per architecture from the prebuilt musl binaries 📥
 
 **Created** 2026-10-13.
 
@@ -27,3 +27,5 @@ users install things.
 
 Effort: one to two days. **Open (maintainer):** which OpenWrt architectures to attach; sign the packages or stay
 with `--allow-untrusted`/`--force-architecture`.
+
+📥 2026-10-13: enqueued in an Opus lane (maintainer: "start an opus lane for task 16 and attach the ipk/apk artifacts to 0.0.2 release").

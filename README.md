@@ -317,7 +317,7 @@ estimate, record of the decisions) is in [mdns-router-research.md](mdns-router-r
 - 🕵️ LuCI app for the OpenWrt package (web UI for rules, hosts, services, status; tested on an OpenWrt 24.10 VM in the lab 2026-10-13)
 - 🤷 pfSense package and web UI (FreeBSD port, packagegui, rules page; OPNsense plugin to be decided)
 - 🤷 IGMP snooping without a querier kills SSDP minutes after start (measured on a Linux bridge): document, or refresh memberships, or be the querier
-- ☑️ OpenWrt packages as release assets (luci-app `all`, discowall `.ipk`/`.apk` per architecture from the musl binaries)
+- 📥 OpenWrt packages as release assets (luci-app `all`, discowall `.ipk`/`.apk` per architecture from the musl binaries)
 - ✅ Concept: rule model, CLI and runtime discussed with the maintainer
 
 🏗️ in progress · 🕵️ built, under test · ☑️ ready for implementation · 🤷 to be clarified · 💤 later · ✅ done
