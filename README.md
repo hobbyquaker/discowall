@@ -60,8 +60,8 @@ nftables sets, so that exactly one such rule per network pair is enough.
 ## Install
 
 Releases on GitHub carry static binaries for x86_64, aarch64 and armv7 (musl, no dependencies), as a tarball with
-the man pages, the systemd unit and the examples, and as `.deb` and `.rpm` packages. For OpenWrt there are two
-packages to build with the OpenWrt SDK (see *OpenWrt* below).
+the man pages, the systemd unit and the examples, and as `.deb` and `.rpm` packages. On OpenWrt use the static
+tarball or build the two packages with the SDK (see *OpenWrt* below).
 
 ```sh
 # Debian, Ubuntu, Armbian
@@ -90,21 +90,43 @@ keep running on the same host; discowall only forwards and never answers for the
 
 ### OpenWrt
 
-`contrib/openwrt/discowall` (the daemon and discoctl, Rust through the packages feed) and
-`contrib/openwrt/luci-app-discowall` (a web UI under *Services → discowall*: status, the rule chain edited
-live with Save and Apply, hosts and services, settings). Copy both into the SDK's `package/` and build them
-(`tests/lab/openwrt.md` has the exact steps, tested with OpenWrt 24.10). On OpenWrt the settings live in UCI:
+There are no `.ipk`/`.apk` files on the release yet (that is task 16 on the roadmap); today there are two ways in.
+
+**1. Static binaries from the release tarball** (x86_64, aarch64 and armv7 routers — the binaries are static musl
+and run on any OpenWrt of that architecture; MIPS routers are not covered yet). Pick the tarball for your CPU
+(`uname -m`: `x86_64`, `aarch64`, `armv7l`), then on the router:
+
+```sh
+cd /tmp && wget https://github.com/hobbyquaker/discowall/releases/download/v0.0.2/discowall-0.0.2-aarch64-unknown-linux-musl.tar.gz
+tar xzf discowall-0.0.2-*.tar.gz && cd discowall-0.0.2-*
+cp discowalld discoctl /usr/bin/ && mkdir -p /etc/discowall && cp rules.toml /etc/discowall/
+# the init script and the UCI defaults from the repository, same version
+wget -O /etc/init.d/discowall https://raw.githubusercontent.com/hobbyquaker/discowall/v0.0.2/contrib/openwrt/discowall/files/discowall.init
+wget -O /tmp/90_discowall https://raw.githubusercontent.com/hobbyquaker/discowall/v0.0.2/contrib/openwrt/discowall/files/discowall.uci-defaults
+chmod +x /etc/init.d/discowall && sh /tmp/90_discowall
+```
+
+**2. Build the packages with the OpenWrt SDK** (gives you `discowall_<version>_<arch>.ipk` and
+`luci-app-discowall_<version>_all.ipk` — the LuCI web UI under *Services → discowall*: status, the rule chain
+edited live with Save and Apply, hosts and services, settings). `contrib/openwrt/discowall` builds the daemon with
+the packages feed's Rust (about an hour the first time), `contrib/openwrt/luci-app-discowall` the UI;
+[tests/lab/openwrt.md](tests/lab/openwrt.md) has the exact steps, tested with OpenWrt 24.10. Install with
+`opkg install ./discowall_*.ipk ./luci-app-discowall_*.ipk` (OpenWrt 25: `apk add --allow-untrusted …`).
+
+Either way the settings live in UCI; name at least two interfaces and start:
 
 ```sh
 uci add_list discowall.main.interface=br-lan
 uci add_list discowall.main.interface=br-iot      # Linux device names, as the rules name them
 uci commit discowall && /etc/init.d/discowall enable && /etc/init.d/discowall start
+discoctl status
 ```
 
 The init script renders `/etc/discowall/discowall.toml` from `/etc/config/discowall` (`interface`, `ipv4`,
-`ipv6`, `ssdp`, `rules_file`); the rules stay in `/etc/discowall/rules.toml`. **Firewall:** a zone with input
-`REJECT` must accept UDP to ports 5353 and 1900, and UDP *from* source ports 5353 and 1900 — the answers to the
-searches and one-shot queries the daemon asks on a querier's behalf come back by unicast to an ephemeral port.
+`ipv6`, `ssdp`, `rules_file`); the rules stay in `/etc/discowall/rules.toml`, edited with `discoctl` or the LuCI
+app. **Firewall:** a zone with input `REJECT` must accept UDP to ports 5353 and 1900, and UDP *from* source ports
+5353 and 1900 — the answers to the searches and one-shot queries the daemon asks on a querier's behalf come back
+by unicast to an ephemeral port.
 
 ## Configuration
 
@@ -295,6 +317,7 @@ estimate, record of the decisions) is in [mdns-router-research.md](mdns-router-r
 - 🕵️ LuCI app for the OpenWrt package (web UI for rules, hosts, services, status; tested on an OpenWrt 24.10 VM in the lab 2026-10-13)
 - 🤷 pfSense package and web UI (FreeBSD port, packagegui, rules page; OPNsense plugin to be decided)
 - 🤷 IGMP snooping without a querier kills SSDP minutes after start (measured on a Linux bridge): document, or refresh memberships, or be the querier
+- ☑️ OpenWrt packages as release assets (luci-app `all`, discowall `.ipk`/`.apk` per architecture from the musl binaries)
 - ✅ Concept: rule model, CLI and runtime discussed with the maintainer
 
 🏗️ in progress · 🕵️ built, under test · ☑️ ready for implementation · 🤷 to be clarified · 💤 later · ✅ done

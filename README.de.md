@@ -61,8 +61,8 @@ nftables-Sets pflegen, damit genau diese Regel pro Netzpaar reicht.
 ## Installation
 
 Die Releases auf GitHub enthalten statische Binaries für x86_64, aarch64 und armv7 (musl, keine Abhängigkeiten)
-als Tarball mit Manpages, systemd-Unit und Beispielen sowie als `.deb`- und `.rpm`-Paket. Für OpenWrt gibt es zwei
-Pakete, die mit dem OpenWrt-SDK gebaut werden (siehe *OpenWrt* unten).
+als Tarball mit Manpages, systemd-Unit und Beispielen sowie als `.deb`- und `.rpm`-Paket. Unter OpenWrt den statischen
+Tarball nutzen oder die zwei Pakete mit dem SDK bauen (siehe *OpenWrt* unten).
 
 ```sh
 # Debian, Ubuntu, Armbian
@@ -91,23 +91,44 @@ avahi-daemon darf auf demselben Host weiterlaufen; discowall leitet nur weiter u
 
 ### OpenWrt
 
-`contrib/openwrt/discowall` (Daemon und discoctl, Rust über den packages-Feed) und
-`contrib/openwrt/luci-app-discowall` (eine Weboberfläche unter *Dienste → discowall*: Status, die Regelkette
-live bearbeitet mit Speichern und Anwenden, Hosts und Dienste, Einstellungen). Beide in das `package/` des SDK
-kopieren und bauen (`tests/lab/openwrt.md` hat die genauen Schritte, getestet mit OpenWrt 24.10). Unter OpenWrt
-stehen die Einstellungen in UCI:
+`.ipk`-/`.apk`-Dateien liegen noch nicht am Release (das ist Aufgabe 16 der Roadmap); heute gibt es zwei Wege.
+
+**1. Statische Binaries aus dem Release-Tarball** (Router mit x86_64, aarch64 oder armv7 — die Binaries sind
+statisch gegen musl gebaut und laufen auf jedem OpenWrt dieser Architektur; MIPS-Router sind noch nicht abgedeckt).
+Den Tarball zur CPU wählen (`uname -m`: `x86_64`, `aarch64`, `armv7l`), dann auf dem Router:
+
+```sh
+cd /tmp && wget https://github.com/hobbyquaker/discowall/releases/download/v0.0.2/discowall-0.0.2-aarch64-unknown-linux-musl.tar.gz
+tar xzf discowall-0.0.2-*.tar.gz && cd discowall-0.0.2-*
+cp discowalld discoctl /usr/bin/ && mkdir -p /etc/discowall && cp rules.toml /etc/discowall/
+# Init-Skript und UCI-Vorgaben aus dem Repository, gleiche Version
+wget -O /etc/init.d/discowall https://raw.githubusercontent.com/hobbyquaker/discowall/v0.0.2/contrib/openwrt/discowall/files/discowall.init
+wget -O /tmp/90_discowall https://raw.githubusercontent.com/hobbyquaker/discowall/v0.0.2/contrib/openwrt/discowall/files/discowall.uci-defaults
+chmod +x /etc/init.d/discowall && sh /tmp/90_discowall
+```
+
+**2. Die Pakete mit dem OpenWrt-SDK bauen** (ergibt `discowall_<version>_<arch>.ipk` und
+`luci-app-discowall_<version>_all.ipk` — die LuCI-Weboberfläche unter *Dienste → discowall*: Status, die
+Regelkette live bearbeitet mit Speichern und Anwenden, Hosts und Dienste, Einstellungen).
+`contrib/openwrt/discowall` baut den Daemon mit dem Rust des packages-Feeds (beim ersten Mal etwa eine Stunde),
+`contrib/openwrt/luci-app-discowall` die Oberfläche; [tests/lab/openwrt.md](tests/lab/openwrt.md) hat die genauen
+Schritte, getestet mit OpenWrt 24.10. Installieren mit `opkg install ./discowall_*.ipk ./luci-app-discowall_*.ipk`
+(OpenWrt 25: `apk add --allow-untrusted …`).
+
+So oder so stehen die Einstellungen in UCI; mindestens zwei Schnittstellen nennen und starten:
 
 ```sh
 uci add_list discowall.main.interface=br-lan
 uci add_list discowall.main.interface=br-iot      # Linux-Gerätenamen, wie die Regeln sie nennen
 uci commit discowall && /etc/init.d/discowall enable && /etc/init.d/discowall start
+discoctl status
 ```
 
 Das Init-Skript erzeugt `/etc/discowall/discowall.toml` aus `/etc/config/discowall` (`interface`, `ipv4`,
-`ipv6`, `ssdp`, `rules_file`); die Regeln bleiben in `/etc/discowall/rules.toml`. **Firewall:** eine Zone mit
-Input `REJECT` muss UDP an die Ports 5353 und 1900 annehmen und UDP *von* den Quellports 5353 und 1900 — die
-Antworten auf Suchen und Einmal-Anfragen, die der Daemon stellvertretend stellt, kommen per Unicast an einen
-ephemeren Port zurück.
+`ipv6`, `ssdp`, `rules_file`); die Regeln bleiben in `/etc/discowall/rules.toml`, bearbeitet mit `discoctl` oder der
+LuCI-App. **Firewall:** eine Zone mit Input `REJECT` muss UDP an die Ports 5353 und 1900 annehmen und UDP *von* den
+Quellports 5353 und 1900 — die Antworten auf Suchen und Einmal-Anfragen, die der Daemon stellvertretend stellt,
+kommen per Unicast an einen ephemeren Port zurück.
 
 ## Konfiguration
 
@@ -304,6 +325,7 @@ Rust, Aufwandsschätzung, Protokoll der Entscheidungen) steht in
 - 🕵️ LuCI-App für das OpenWrt-Paket (Web-UI für Regeln, Hosts, Dienste, Status; getestet auf einer OpenWrt-24.10-VM im Labor 2026-10-13)
 - 🤷 pfSense-Paket und Web-UI (FreeBSD-Port, packagegui, Regelseite; OPNsense-Plugin offen)
 - 🤷 IGMP-Snooping ohne Querier lässt SSDP Minuten nach dem Start sterben (an einer Linux-Bridge gemessen): dokumentieren, Mitgliedschaften auffrischen oder selbst Querier sein
+- ☑️ OpenWrt-Pakete als Release-Dateien (luci-app `all`, discowall `.ipk`/`.apk` je Architektur aus den musl-Binaries)
 - ✅ Konzept: Regelmodell, CLI, Laufzeit mit dem Maintainer besprochen
 
 🏗️ in Arbeit · 🕵️ gebaut, in Prüfung · ☑️ bereit zur Umsetzung · 🤷 noch zu klären · 💤 später · ✅ erledigt
