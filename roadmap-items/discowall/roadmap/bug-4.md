@@ -67,3 +67,8 @@ the insertion): the copy parses with all four records and the shifted pointer st
 TXTs; nothing to do for a well-formed packet; an empty A record stays unparsable; accept-all forwards the original
 bytes byte-identical with `unparsable` at 0; a rule dropping the A record rebuilds the packet, which parses strictly
 and carries the TXT as one zero byte. 🕵️ until the real router shows the Quest Link service outside its segment.
+
+**Measured in the lab 2026-10-17** (0.0.3 deb on the router container): the hand-built announcement (PTR, empty TXT,
+SRV, A) sent by multicast from the iot host arrived on the lan host **byte-identical**, from the router; `unparsable`
+stayed 0; `discoctl hosts` learned `pc.local` with `_quest._tcp`. The nine lab cases pass with this build. Still 🕵️
+until the real router shows the Quest Link service outside its segment.

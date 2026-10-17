@@ -109,7 +109,7 @@ example):
 
 ```sh
 opkg print-architecture                     # the line with the highest priority is the router's architecture
-cd /tmp && v=0.0.2 && u=https://github.com/hobbyquaker/discowall/releases/download/v$v
+cd /tmp && v=0.0.3 && u=https://github.com/hobbyquaker/discowall/releases/download/v$v
 wget $u/discowall_$v-r1_aarch64_cortex-a53.ipk $u/luci-app-discowall_$v-r1_all.ipk
 opkg update && opkg install ./discowall_$v-r1_aarch64_cortex-a53.ipk ./luci-app-discowall_$v-r1_all.ipk
 # OpenWrt 25.12: apk --print-arch; the same with .apk, then
@@ -126,7 +126,7 @@ router's own entries:
 
 ```sh
 opkg install $(opkg print-architecture | awk '{printf "--add-arch %s:%s ", $2, $3}') \
-  --add-arch aarch64_cortex-a53:5 ./discowall_0.0.2-r1_aarch64_cortex-a53.ipk
+  --add-arch aarch64_cortex-a53:5 ./discowall_0.0.3-r1_aarch64_cortex-a53.ipk
 ```
 
 (A plain `opkg install` of a foreign-architecture file crashed opkg 2024.10.16 with a segmentation fault, measured
@@ -137,12 +137,12 @@ on OpenWrt 24.10.8.) For `apk` this is untried; use the tarball below. **MIPS** 
 your CPU (`uname -m`: `x86_64`, `aarch64`, `armv7l`), then on the router:
 
 ```sh
-cd /tmp && wget https://github.com/hobbyquaker/discowall/releases/download/v0.0.2/discowall-0.0.2-aarch64-unknown-linux-musl.tar.gz
-tar xzf discowall-0.0.2-*.tar.gz && cd discowall-0.0.2-*
+cd /tmp && wget https://github.com/hobbyquaker/discowall/releases/download/v0.0.3/discowall-0.0.3-aarch64-unknown-linux-musl.tar.gz
+tar xzf discowall-0.0.3-*.tar.gz && cd discowall-0.0.3-*
 cp discowalld discoctl /usr/bin/ && mkdir -p /etc/discowall && cp rules.toml /etc/discowall/
 # the init script and the UCI defaults from the repository, same version
-wget -O /etc/init.d/discowall https://raw.githubusercontent.com/hobbyquaker/discowall/v0.0.2/contrib/openwrt/discowall/files/discowall.init
-wget -O /tmp/90_discowall https://raw.githubusercontent.com/hobbyquaker/discowall/v0.0.2/contrib/openwrt/discowall/files/discowall.uci-defaults
+wget -O /etc/init.d/discowall https://raw.githubusercontent.com/hobbyquaker/discowall/v0.0.3/contrib/openwrt/discowall/files/discowall.init
+wget -O /tmp/90_discowall https://raw.githubusercontent.com/hobbyquaker/discowall/v0.0.3/contrib/openwrt/discowall/files/discowall.uci-defaults
 chmod +x /etc/init.d/discowall && sh /tmp/90_discowall
 ```
 

@@ -5,7 +5,7 @@
 # 25.12 and later .apk. Used by the release workflow (one run per OpenWrt version and architecture)
 # and by hand. Needs the SDK's host tools (tests/lab/openwrt.md lists the Debian packages); no Rust.
 #
-#   build-packages.sh -o 24.10.8 -t mediatek/filogic -v 0.0.2 -O out/ [-d tarballs/] [-s src/] [--luci]
+#   build-packages.sh -o 24.10.8 -t mediatek/filogic -v 0.0.3 -O out/ [-d tarballs/] [-s src/] [--luci]
 #
 #   -o  OpenWrt release whose SDK to use          -t  target/subtarget of that SDK (one per architecture)
 #   -v  discowall version (the release tag without v)
