@@ -1,4 +1,4 @@
-## 17. Say why a packet was unparsable: reason in discoctl watch and a rate-limited info log ☑️
+## 17. Say why a packet was unparsable: reason in discoctl watch and a rate-limited info log 🏗️
 
 **Created** 2026-10-17.
 

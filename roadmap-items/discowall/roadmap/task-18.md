@@ -1,4 +1,4 @@
-## 18. README: drop the "has not run on a real router yet" caution (first real-router run 2026-10-17) ☑️
+## 18. README: drop the "has not run on a real router yet" caution (first real-router run 2026-10-17) 🏗️
 
 **Created** 2026-10-17 (maintainer: one task for removing the "did not run on a real router" warning).
 

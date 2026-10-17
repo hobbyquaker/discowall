@@ -2,10 +2,10 @@
 
 ## Roadmap
 
-- 18. README: drop the "has not run on a real router yet" caution (first real-router run 2026-10-17) ☑️ — [task-18.md](../roadmap-items/discowall/roadmap/task-18.md)
-- 17. Say why a packet was unparsable: reason in discoctl watch and a rate-limited info log ☑️ — [task-17.md](../roadmap-items/discowall/roadmap/task-17.md)
-- B-5. discowalld --check does not read the rules file: a broken rules.toml passes ☑️ — [bug-5.md](../roadmap-items/discowall/roadmap/bug-5.md)
-- B-4. A TXT record with RDLENGTH 0 makes the whole packet unparsable (hickory InvalidEmptyRecord) ☑️ — [bug-4.md](../roadmap-items/discowall/roadmap/bug-4.md)
+- 18. README: drop the "has not run on a real router yet" caution (first real-router run 2026-10-17) 🏗️ — [task-18.md](../roadmap-items/discowall/roadmap/task-18.md)
+- 17. Say why a packet was unparsable: reason in discoctl watch and a rate-limited info log 🏗️ — [task-17.md](../roadmap-items/discowall/roadmap/task-17.md)
+- B-5. discowalld --check does not read the rules file: a broken rules.toml passes 🏗️ — [bug-5.md](../roadmap-items/discowall/roadmap/bug-5.md)
+- B-4. A TXT record with RDLENGTH 0 makes the whole packet unparsable (hickory InvalidEmptyRecord) 🏗️ — [bug-4.md](../roadmap-items/discowall/roadmap/bug-4.md)
 - 16. OpenWrt packages as release assets: luci-app-discowall (all) and discowall .ipk/.apk per architecture from the prebuilt musl binaries 🕵️ — [task-16.md](../roadmap-items/discowall/roadmap/task-16.md)
 - 15. IGMP snooping without a querier: SSDP dies minutes after start (measured on a Linux bridge) — document, or refresh memberships 🤷 — [task-15.md](../roadmap-items/discowall/roadmap/task-15.md)
 - 14. pfSense package and web UI (and OPNsense plugin?): FreeBSD port, packagegui descriptor, rules page 🤷 — [task-14.md](../roadmap-items/discowall/roadmap/task-14.md)

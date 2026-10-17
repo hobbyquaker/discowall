@@ -1,4 +1,4 @@
-## B-5. discowalld --check does not read the rules file: a broken rules.toml passes ☑️
+## B-5. discowalld --check does not read the rules file: a broken rules.toml passes 🏗️
 
 **Created** 2026-10-17.
 

@@ -360,10 +360,10 @@ Rust, Aufwandsschätzung, Protokoll der Entscheidungen) steht in
 - 🤷 pfSense-Paket und Web-UI (FreeBSD-Port, packagegui, Regelseite; OPNsense-Plugin offen)
 - 🤷 IGMP-Snooping ohne Querier lässt SSDP Minuten nach dem Start sterben (an einer Linux-Bridge gemessen): dokumentieren, Mitgliedschaften auffrischen oder selbst Querier sein
 - 🕵️ OpenWrt-Pakete als Release-Dateien (luci-app `all`, discowall `.ipk`/`.apk` je Architektur aus den musl-Binaries)
-- ☑️ B-4: ein TXT-Record mit RDLENGTH 0 macht das ganze Paket unlesbar (gefunden auf dem ersten echten Router; Lösung: unverändert weiterleiten, wie avahi)
-- ☑️ B-5: `discowalld --check` liest die Regeldatei nicht
-- ☑️ Sagen, warum ein Paket unlesbar war: der Grund in `discoctl watch` und ein gedrosseltes Info-Log
-- ☑️ README: den Hinweis „noch auf keinem echten Router gelaufen“ entfernen (erster Lauf auf einem echten Router 2026-10-17)
+- 🏗️ B-4: ein TXT-Record mit RDLENGTH 0 macht das ganze Paket unlesbar (gefunden auf dem ersten echten Router; Lösung: unverändert weiterleiten, wie avahi)
+- 🏗️ B-5: `discowalld --check` liest die Regeldatei nicht
+- 🏗️ Sagen, warum ein Paket unlesbar war: der Grund in `discoctl watch` und ein gedrosseltes Info-Log
+- 🏗️ README: den Hinweis „noch auf keinem echten Router gelaufen“ entfernen (erster Lauf auf einem echten Router 2026-10-17)
 - ✅ Konzept: Regelmodell, CLI, Laufzeit mit dem Maintainer besprochen
 
 🏗️ in Arbeit · 🕵️ gebaut, in Prüfung · ☑️ bereit zur Umsetzung · 🤷 noch zu klären · 💤 später · ✅ erledigt

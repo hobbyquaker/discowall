@@ -1,4 +1,4 @@
-## B-4. A TXT record with RDLENGTH 0 makes the whole packet unparsable (hickory InvalidEmptyRecord) ☑️
+## B-4. A TXT record with RDLENGTH 0 makes the whole packet unparsable (hickory InvalidEmptyRecord) 🏗️
 
 **Created** 2026-10-17.
 
