@@ -55,6 +55,19 @@ OpenWrt VM (905) are on the node and stay (see *Cold start*).
   paths — cost an hour on 2026-10-13); the README's Roadmap list is hand-maintained in both languages; SSDP over IPv6 is implemented but only v4-tested; the `discowalld --version` string is the
   workspace version, so dev debs (`--deb-version 0.0.2~dev2`) still say 0.0.1.
 
+## 2026-10-17 — first real-router run of 0.0.2; B-4, B-5, tasks 17 and 18 filed
+
+- **Real router:** the maintainer installed the 0.0.2 `.deb` on a Debian 12 x86_64 router and replaced avahi's
+  reflector with it (avahi stays as the responder, `enable-reflector=no`): five interfaces (untagged LAN, three VLANs,
+  a VXLAN), IPv4 + IPv6, `default = "accept"`, SSDP off, the shipped unit. Interfaces joined on both families,
+  Matter and HomeKit services from other segments in `discoctl hosts`, no send errors. Details in task 18.
+- **B-4 (🤷):** a TXT record with RDLENGTH 0 makes hickory-proto 0.26.3 fail the whole packet (`InvalidEmptyRecord`,
+  reproduced against the captured packet); RFC 6763 §6.1 says to treat it as an empty string. The fix shape is open.
+- **B-5 (☑️):** `discowalld --check` never reads the rules file (a `default = "acept"` passes).
+- **Task 17 (☑️):** the reason for `unparsable` is only in the debug log; show it in `watch` and a rate-limited info line.
+- **Task 18 (☑️):** drop the README's "not run on a real router yet" caution — after the router has run a few days.
+- Nothing committed in code; nothing pushed.
+
 ## 2026-10-13 (Opus lane) — task 16: OpenWrt .ipk/.apk on the v0.0.2 release, release job for future tags
 
 - **On v0.0.2** (`gh release upload`, the maintainer's word): `luci-app-discowall_0.0.2-r1_all.{ipk,apk}` and
@@ -127,14 +140,3 @@ OpenWrt VM (905) are on the node and stay (see *Cold start*).
 - **Tasks 13, 14, 15 filed** with [notes/web-ui-research.md](notes/web-ui-research.md): LuCI app (client-side JS +
   a ucode rpcd plugin over `discoctl --json`), pfSense package + UI (two FreeBSD ports, packagegui descriptor, prior
   art `pfSense-pkg-mDNS-Bridge`; OPNsense plugin as the alternative; blocked by task 9), IGMP snooping.
-
-## 2026-10-10 (release) — v0.0.1 on GitHub, end-to-end testing proposed
-
-- **Release `v0.0.1`** tagged and published on the maintainer's word; the release workflow succeeded on its first
-  run (three musl targets, tarballs, deb, rpm, nine assets). CI green on `master`.
-- **End-to-end testing:** [notes/e2e-testing-research.md](notes/e2e-testing-research.md) proposes a Proxmox lab
-  of three LXC containers on a VLAN-aware bridge driven by `tests/lab/lab.py` over SSH (task 11, 🤷, needs the
-  maintainer's answers on VLAN tags and SSH access), avahi inside the namespace test on GitHub (task 12, ☑️), and
-  a manual per-release checklist on the real router.
-- **Next:** the maintainer answers task 11's questions and OQ-10/OQ-11; tries v0.0.1 on a router (tasks 2–6 and
-  8 → ✅); a session can take task 12 without the lab.
