@@ -5,8 +5,10 @@
 [![CI](https://github.com/hobbyquaker/discowall/actions/workflows/ci.yml/badge.svg)](https://github.com/hobbyquaker/discowall/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-> [!CAUTION]
-> discowall is under development. The reflector with its rule chain and CLI exists (P0, P1) but has not run on a real router yet.
+> [!NOTE]
+> discowall is young (0.0.x) and under development. It has run on a real router since October 2026 (Debian,
+> five interfaces including VLANs and a VXLAN, beside avahi-daemon) and every change is tested end to end in a lab
+> with avahi, a UPnP device and OpenWrt. Expect rough edges and please report them.
 
 discowall is a **discovery firewall** for a Linux router: it forwards mDNS packets (Bonjour, Zeroconf, RFC 6762)
 from one network interface to others, as avahi-daemon's reflector does, but under **rules**: which hosts and
@@ -360,7 +362,7 @@ estimate, record of the decisions) is in [mdns-router-research.md](mdns-router-r
 - 🕵️ B-4: a TXT record with RDLENGTH 0 makes the whole packet unparsable (found on the first real router; fix: forward as-is, as avahi does)
 - ✅ B-5: `discowalld --check` does not read the rules file
 - ✅ Say why a packet was unparsable: the reason in `discoctl watch` and a rate-limited info log
-- 🏗️ README: drop the "not run on a real router yet" caution (first real-router run 2026-10-17)
+- ✅ README: drop the "not run on a real router yet" caution (first real-router run 2026-10-17)
 - ✅ Concept: rule model, CLI and runtime discussed with the maintainer
 
 🏗️ in progress · 🕵️ built, under test · ☑️ ready for implementation · 🤷 to be clarified · 💤 later · ✅ done

@@ -1,4 +1,4 @@
-## 18. README: drop the "has not run on a real router yet" caution (first real-router run 2026-10-17) 🏗️
+## 18. README: drop the "has not run on a real router yet" caution (first real-router run 2026-10-17) ✅
 
 **Created** 2026-10-17 (maintainer: one task for removing the "did not run on a real router" warning).
 
@@ -22,3 +22,9 @@ x86_64 router, under the shipped systemd unit:
 
 Hold the change until the router has run for a while (a few days, a reboot and an interface flap) so that the
 claim covers more than the first hour.
+
+**Done 2026-10-17** on the maintainer's word ("fix/implement B4, B5, Task-17, Task-18, release 0.0.3"), which
+overrides the hold above (a few days, a reboot, an interface flap). The `[!CAUTION]` at the top of both READMEs is
+now a `[!NOTE]`: young (0.0.x), under development, on a real router since October 2026 (Debian, five interfaces
+incl. VLANs and a VXLAN, beside avahi-daemon), every change tested end to end in the lab; rough edges expected. The
+wording is the session's choice; the item asked the maintainer to decide it, so it may change. ✅ 2026-10-17.

@@ -5,8 +5,10 @@
 [![CI](https://github.com/hobbyquaker/discowall/actions/workflows/ci.yml/badge.svg)](https://github.com/hobbyquaker/discowall/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-> [!CAUTION]
-> discowall ist in Entwicklung. Der Reflector mit Regelkette und CLI steht (P0, P1), ist aber noch auf keinem echten Router gelaufen.
+> [!NOTE]
+> discowall ist jung (0.0.x) und in Entwicklung. Seit Oktober 2026 läuft es auf einem echten Router (Debian,
+> fünf Schnittstellen mit VLANs und einem VXLAN, neben avahi-daemon), und jede Änderung wird in einem Lab mit avahi,
+> einem UPnP-Gerät und OpenWrt durchgetestet. Mit Ecken und Kanten ist zu rechnen; bitte melden.
 
 discowall ist eine **Discovery-Firewall** für einen Linux-Router: Es leitet mDNS-Pakete (Bonjour, Zeroconf,
 RFC 6762) von einer Netzwerkschnittstelle auf andere weiter, so wie es der Reflector von avahi-daemon tut, aber
@@ -368,7 +370,7 @@ Rust, Aufwandsschätzung, Protokoll der Entscheidungen) steht in
 - 🕵️ B-4: ein TXT-Record mit RDLENGTH 0 macht das ganze Paket unlesbar (gefunden auf dem ersten echten Router; Lösung: unverändert weiterleiten, wie avahi)
 - ✅ B-5: `discowalld --check` liest die Regeldatei nicht
 - ✅ Sagen, warum ein Paket unlesbar war: der Grund in `discoctl watch` und ein gedrosseltes Info-Log
-- 🏗️ README: den Hinweis „noch auf keinem echten Router gelaufen“ entfernen (erster Lauf auf einem echten Router 2026-10-17)
+- ✅ README: den Hinweis „noch auf keinem echten Router gelaufen“ entfernen (erster Lauf auf einem echten Router 2026-10-17)
 - ✅ Konzept: Regelmodell, CLI, Laufzeit mit dem Maintainer besprochen
 
 🏗️ in Arbeit · 🕵️ gebaut, in Prüfung · ☑️ bereit zur Umsetzung · 🤷 noch zu klären · 💤 später · ✅ erledigt
