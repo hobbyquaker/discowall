@@ -1,4 +1,4 @@
-## B-4. A TXT record with RDLENGTH 0 makes the whole packet unparsable (hickory InvalidEmptyRecord) 🏗️
+## B-4. A TXT record with RDLENGTH 0 makes the whole packet unparsable (hickory InvalidEmptyRecord) 🕵️
 
 **Created** 2026-10-17.
 
@@ -57,3 +57,13 @@ so only the parse has to succeed:
   Then the real-router check of task 18: the Quest Link service becomes visible outside its segment.
 
 Effort: half a day. ☑️ 2026-10-17.
+
+**Built 2026-10-17.** `normalize_empty_txt` in `crates/discowalld/src/packet.rs` walks the packet once (questions,
+owner names, the compressible names inside NS/CNAME/PTR/NSEC/MX/SRV/SOA data), inserts one zero byte into every
+RDLENGTH-0 TXT of a **copy** and moves every compression pointer whose target lies at or behind an insertion;
+`Packet::parse` falls back to it only when the strict parse fails, and logs at debug. hickory-proto stays at 0.26.3
+(the version checked). Tests, all on a hand-built announcement (PTR, empty TXT, SRV, A whose owner points behind
+the insertion): the copy parses with all four records and the shifted pointer still names `pc.local`; two empty
+TXTs; nothing to do for a well-formed packet; an empty A record stays unparsable; accept-all forwards the original
+bytes byte-identical with `unparsable` at 0; a rule dropping the A record rebuilds the packet, which parses strictly
+and carries the TXT as one zero byte. 🕵️ until the real router shows the Quest Link service outside its segment.

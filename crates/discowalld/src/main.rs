@@ -33,9 +33,13 @@ struct Args {
     /// The configuration file.
     #[arg(short, long, default_value = "/etc/discowall/discowall.toml")]
     config: PathBuf,
-    /// Check the configuration and exit.
+    /// Check the configuration and the rules file it names (as start and `apply` load them), and exit.
     #[arg(long)]
     check: bool,
+    /// With --check: check this rules file instead of the one the configuration names (the
+    /// configuration is then not read), e.g. a new rules.toml before installing it.
+    #[arg(long, value_name = "FILE", requires = "check")]
+    rules: Option<PathBuf>,
     /// Log level or filter (RUST_LOG syntax).
     #[arg(long, default_value = "info", env = "DISCOWALL_LOG")]
     log: String,
@@ -65,6 +69,10 @@ fn main() -> Result<()> {
         fmt.init();
     }
 
+    if let Some(rules) = &args.rules {
+        println!("{}", reflector::check_rules(rules)?);
+        return Ok(());
+    }
     let config = Config::load(&args.config)?;
     if args.check {
         println!(
@@ -72,6 +80,7 @@ fn main() -> Result<()> {
             args.config.display(),
             config.interfaces.len()
         );
+        println!("{}", reflector::check_rules(&config.rules_file)?);
         return Ok(());
     }
     let rt = tokio::runtime::Builder::new_multi_thread()

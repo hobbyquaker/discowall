@@ -95,6 +95,26 @@ fn load_rules(path: &std::path::Path) -> Result<RuleSet> {
     }
 }
 
+/// `discowalld --check`: loads and compiles a rules file exactly as start and `apply` do, and says
+/// what the daemon would run with (B-5). A missing file is not an error — the daemon starts with
+/// default drop then — but it is said.
+pub fn check_rules(path: &std::path::Path) -> Result<String> {
+    if !path.exists() {
+        return Ok(format!(
+            "{}: no rules file: default drop, nothing crosses",
+            path.display()
+        ));
+    }
+    let set = load_rules(path)?;
+    let chain = Chain::compile(&set).with_context(|| format!("compiling {}", path.display()))?;
+    Ok(format!(
+        "{}: ok ({} rules, default {})",
+        path.display(),
+        chain.rules.len(),
+        chain.default
+    ))
+}
+
 fn render_rules(set: &RuleSet) -> Result<String> {
     Ok(format!(
         "# discowall rules — written by `discoctl save`; `discoctl apply` reloads it.\n\n{}",
@@ -1507,6 +1527,63 @@ mod tests {
         assert_eq!(to, vec!["iot", "guest"]);
         assert_eq!(sock.take(), vec![(q.clone(), 11), (q, 12)]);
         assert_eq!(r.counters.tx, 2);
+    }
+
+    #[test]
+    fn check_rules_loads_and_compiles_like_start() {
+        let d = TempDir::new();
+        let f = d.path.join("rules.toml");
+        assert!(check_rules(&f)
+            .unwrap()
+            .contains("no rules file: default drop"));
+        std::fs::write(&f, HOMEKIT).unwrap();
+        assert!(check_rules(&f)
+            .unwrap()
+            .ends_with("ok (2 rules, default drop)"));
+        for broken in [
+            "default = \"acept\"\n",
+            "[[rule]]\nkind = [\"anounce\"]\naction = \"accept\"\n",
+            "[[rule]]\naction = \"maybe\"\n",
+            "[[rule]]\nrrtype = [\"BOGUS\"]\naction = \"accept\"\n",
+            "[[rule]]\nsrc = [\"10.0.0.0/33\"]\naction = \"accept\"\n",
+            "default = \"accept\"\n[[rule\n",
+        ] {
+            std::fs::write(&f, broken).unwrap();
+            assert!(check_rules(&f).is_err(), "must fail: {broken:?}");
+        }
+    }
+
+    #[test]
+    fn empty_txt_is_forwarded_as_is_or_rebuilt_with_one_zero_byte() {
+        // B-4: accept-all forwards the original bytes, empty TXT and all.
+        let (mut r, sock, _d) = setup(ACCEPT_ALL);
+        let raw = crate::packet::empty_txt_announcement(1);
+        assert_eq!(r.on_packet(packet(11, "10.1.0.9", &raw)).len(), 2);
+        assert_eq!(r.counters.dropped_unparsable, 0);
+        let sent = sock.take();
+        assert_eq!(sent.len(), 2);
+        assert!(
+            sent.iter().all(|(b, _)| *b == raw),
+            "forwarded byte-identical"
+        );
+
+        // A rule drops the A record: the packet is rebuilt, the TXT goes out as one zero byte
+        // (RFC 6763 §6.1, as avahi's reflector sends it) and parses strictly.
+        let (mut r, sock, _d) =
+            setup("default = \"accept\"\n[[rule]]\nrrtype = [\"A\"]\naction = \"drop\"\n");
+        assert_eq!(r.on_packet(packet(11, "10.1.0.9", &raw)).len(), 2);
+        let (out, _) = sock.take().remove(0);
+        let m = Message::from_vec(&out).expect("the rebuild is strictly valid");
+        let txt = m
+            .answers
+            .iter()
+            .find(|rec| rec.record_type() == RecordType::TXT)
+            .expect("TXT kept");
+        let mut buf = Vec::new();
+        let mut enc = hickory_proto::serialize::binary::BinEncoder::new(&mut buf);
+        hickory_proto::serialize::binary::BinEncodable::emit(&txt.data, &mut enc).unwrap();
+        assert_eq!(buf, [0u8], "one empty string");
+        assert!(m.additionals.is_empty(), "the A record was dropped");
     }
 
     #[test]

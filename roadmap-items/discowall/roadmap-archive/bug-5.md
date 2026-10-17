@@ -1,4 +1,4 @@
-## B-5. discowalld --check does not read the rules file: a broken rules.toml passes 🏗️
+## B-5. discowalld --check does not read the rules file: a broken rules.toml passes ✅
 
 **Created** 2026-10-17.
 
@@ -20,3 +20,11 @@ read when the daemon starts or on `discoctl apply`/SIGHUP. So a broken rule chai
 
 Optional: `--check --rules <file>` to validate a rules file on its own, so that a deploy script can check a new
 `rules.toml` without a temporary config.
+
+**Fixed 2026-10-17.** `discowalld --check` also runs `check_rules` (`reflector.rs`): the same `load_rules` +
+`Chain::compile` as start and `apply`, printing `<file>: ok (N rules, default <policy>)`, or
+`<file>: no rules file: default drop, nothing crosses`, or the error with exit 1. The optional
+`--check --rules <file>` checks a rules file alone without reading a configuration. **Measured** with the built
+binary: the item's reproduction (`default = "acept"`) now exits 1 with `unknown variant \`acept\``; `contrib/rules.toml`
+gives `ok (5 rules, default drop)`; a missing file is reported and exits 0. Unit test: valid, missing, a typo in
+default, kind and action, an unknown rrtype, an invalid prefix, a TOML syntax error. ✅ 2026-10-17.

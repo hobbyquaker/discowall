@@ -121,8 +121,178 @@ fn record_info(section: Section, r: &Record) -> RecordInfo {
     }
 }
 
+/// RFC 6763 §6.1: a TXT record with RDLENGTH 0 "is not strictly legal, but should one be received,
+/// it should be interpreted as the same as a single empty string". hickory-proto (0.26.3) rejects
+/// the whole message (`InvalidEmptyRecord`). This returns a copy in which every such TXT carries
+/// one zero byte, with every compression pointer behind an insertion moved along, or `None` when
+/// the packet has no empty TXT or cannot be walked (B-4). The copy is only parsed: what is
+/// forwarded unchanged are the original bytes; a rebuilt packet carries the TXT as one zero byte,
+/// as avahi's reflector sends it (avahi-common/strlst.c, read 2026-10-17).
+pub fn normalize_empty_txt(bytes: &[u8]) -> Option<Vec<u8>> {
+    // Offsets of compression pointers (the two bytes) and of the empty TXT records' RDLENGTH.
+    let mut pointers: Vec<usize> = Vec::new();
+    let mut empty_txt: Vec<usize> = Vec::new();
+
+    // Walks a name at `off`; returns the offset behind it. Only the pointer positions matter here,
+    // their targets are not followed (they point backwards into names already walked or not).
+    fn walk_name(b: &[u8], mut off: usize, pointers: &mut Vec<usize>) -> Option<usize> {
+        for _ in 0..128 {
+            let len = *b.get(off)? as usize;
+            match len & 0xC0 {
+                0x00 if len == 0 => return Some(off + 1),
+                0x00 => off += 1 + len,
+                0xC0 => {
+                    b.get(off + 1)?;
+                    pointers.push(off);
+                    return Some(off + 2);
+                }
+                _ => return None,
+            }
+        }
+        None
+    }
+    fn u16_at(b: &[u8], off: usize) -> Option<u16> {
+        Some(u16::from_be_bytes([*b.get(off)?, *b.get(off + 1)?]))
+    }
+
+    let qd = u16_at(bytes, 4)?;
+    let records =
+        u16_at(bytes, 6)? as usize + u16_at(bytes, 8)? as usize + u16_at(bytes, 10)? as usize;
+    let mut off = 12;
+    for _ in 0..qd {
+        off = walk_name(bytes, off, &mut pointers)? + 4;
+    }
+    for _ in 0..records {
+        off = walk_name(bytes, off, &mut pointers)?;
+        let rtype = u16_at(bytes, off)?;
+        let rdlen = u16_at(bytes, off + 8)? as usize;
+        let rdata = off + 10;
+        let end = rdata + rdlen;
+        if end > bytes.len() {
+            return None;
+        }
+        // Names inside the data that may be compressed (RFC 3597 §4 lists the types; NSEC is
+        // there because mDNS responders compress it in practice).
+        match rtype {
+            2 | 5 | 12 | 47 => {
+                walk_name(bytes, rdata, &mut pointers)?;
+            }
+            15 => {
+                walk_name(bytes, rdata + 2, &mut pointers)?;
+            }
+            33 => {
+                walk_name(bytes, rdata + 6, &mut pointers)?;
+            }
+            6 => {
+                let next = walk_name(bytes, rdata, &mut pointers)?;
+                walk_name(bytes, next, &mut pointers)?;
+            }
+            16 if rdlen == 0 => empty_txt.push(off + 8),
+            _ => {}
+        }
+        off = end;
+    }
+    if empty_txt.is_empty() {
+        return None;
+    }
+    // An insertion lands at the start of the (empty) RDATA, i.e. RDLENGTH + 2. A pointer whose
+    // target is at or behind an insertion point moves by the number of those insertions.
+    let inserts: Vec<usize> = empty_txt.iter().map(|o| o + 2).collect();
+    let shift = |target: usize| inserts.iter().filter(|&&i| i <= target).count();
+    let mut out = Vec::with_capacity(bytes.len() + inserts.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if inserts.contains(&i) {
+            out.push(0);
+        }
+        if empty_txt.contains(&i) {
+            out.extend_from_slice(&1u16.to_be_bytes());
+            i += 2;
+            continue;
+        }
+        if pointers.contains(&i) {
+            let target = (u16_at(bytes, i)? & 0x3FFF) as usize;
+            let moved = target + shift(target);
+            if moved > 0x3FFF {
+                return None;
+            }
+            out.extend_from_slice(&(0xC000 | moved as u16).to_be_bytes());
+            i += 2;
+            continue;
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    // The last record's RDATA may end the packet: an insertion at the very end.
+    if inserts.contains(&bytes.len()) {
+        out.push(0);
+    }
+    Some(out)
+}
+
+/// A hand-built announcement like the one of B-4 (D-9: no captured data): PTR, then `txts` TXT
+/// records with RDLENGTH 0, then SRV with target `pc.local`, then an A record whose owner is a
+/// compression pointer to that target — behind the insertion point, so it must be moved.
+#[cfg(test)]
+pub(crate) fn empty_txt_announcement(txts: usize) -> Vec<u8> {
+    fn label_name(out: &mut Vec<u8>, labels: &[&str]) {
+        for l in labels {
+            out.push(l.len() as u8);
+            out.extend_from_slice(l.as_bytes());
+        }
+        out.push(0);
+    }
+    let mut b = vec![0, 0, 0x84, 0, 0, 0, 0, (2 + txts) as u8, 0, 0, 0, 1];
+    // PTR _quest._tcp.local -> Quest._quest._tcp.local
+    let svc = b.len();
+    label_name(&mut b, &["_quest", "_tcp", "local"]);
+    b.extend_from_slice(&[0, 12, 0, 1, 0, 0, 0x11, 0x94]);
+    let rdlen_at = b.len();
+    b.extend_from_slice(&[0, 0]);
+    let inst = b.len();
+    b.push(5);
+    b.extend_from_slice(b"Quest");
+    b.extend_from_slice(&(0xC000 | svc as u16).to_be_bytes());
+    let rdlen = (b.len() - rdlen_at - 2) as u16;
+    b[rdlen_at..rdlen_at + 2].copy_from_slice(&rdlen.to_be_bytes());
+    // TXT, RDLENGTH 0, owner -> the instance name
+    for _ in 0..txts {
+        b.extend_from_slice(&(0xC000 | inst as u16).to_be_bytes());
+        b.extend_from_slice(&[0, 16, 0x80, 1, 0, 0, 0x11, 0x94, 0, 0]);
+    }
+    // SRV 0 0 9000 pc.local, owner -> the instance name
+    b.extend_from_slice(&(0xC000 | inst as u16).to_be_bytes());
+    b.extend_from_slice(&[0, 33, 0x80, 1, 0, 0, 0, 120]);
+    let rdlen_at = b.len();
+    b.extend_from_slice(&[0, 0, 0, 0, 0, 0, 0x23, 0x28]);
+    let target = b.len();
+    label_name(&mut b, &["pc", "local"]);
+    let rdlen = (b.len() - rdlen_at - 2) as u16;
+    b[rdlen_at..rdlen_at + 2].copy_from_slice(&rdlen.to_be_bytes());
+    // A 10.2.0.9, owner -> pc.local in the SRV data
+    b.extend_from_slice(&(0xC000 | target as u16).to_be_bytes());
+    b.extend_from_slice(&[0, 1, 0x80, 1, 0, 0, 0, 120, 0, 4, 10, 2, 0, 9]);
+    b
+}
+
 impl Packet {
+    /// Parses a packet; one with an empty TXT record (RFC 6763 §6.1) is parsed from a normalised
+    /// copy (B-4). The records keep their order, so verdicts per record apply to the original.
     pub fn parse(bytes: &[u8]) -> Result<Self, hickory_proto::serialize::binary::DecodeError> {
+        match Self::parse_strict(bytes) {
+            Ok(p) => Ok(p),
+            Err(e) => match normalize_empty_txt(bytes) {
+                Some(copy) => {
+                    let p = Self::parse_strict(&copy).map_err(|_| e)?;
+                    tracing::debug!("empty TXT record read as one empty string (RFC 6763 §6.1)");
+                    Ok(p)
+                }
+                None => Err(e),
+            },
+        }
+    }
+
+    fn parse_strict(bytes: &[u8]) -> Result<Self, hickory_proto::serialize::binary::DecodeError> {
         let message = Message::from_vec(bytes)?;
         let questions = message
             .queries
@@ -373,6 +543,48 @@ mod tests {
             true,
         ));
         m.to_vec().unwrap()
+    }
+
+    #[test]
+    fn empty_txt_is_read_as_one_empty_string() {
+        let raw = empty_txt_announcement(1);
+        assert!(Message::from_vec(&raw).is_err(), "hickory rejects it (B-4)");
+        let p = Packet::parse(&raw).unwrap();
+        assert_eq!(p.kind, Kind::Announce);
+        let types: Vec<_> = p.records.iter().map(|r| r.rtype).collect();
+        assert_eq!(
+            types,
+            [
+                RecordType::PTR,
+                RecordType::TXT,
+                RecordType::SRV,
+                RecordType::A
+            ]
+        );
+        assert_eq!(p.records[1].name, "quest._quest._tcp.local"); // names are compared lowercased
+                                                                  // The A record's owner was a pointer behind the insertion: still pc.local after the shift.
+        assert_eq!(p.records[3].name, "pc.local");
+        assert_eq!(p.records[3].data, Data::Addr("10.2.0.9".parse().unwrap()));
+        assert_eq!(p.hosts(), vec!["pc.local".to_string()]);
+    }
+
+    #[test]
+    fn two_empty_txts_and_none() {
+        let p = Packet::parse(&empty_txt_announcement(2)).unwrap();
+        assert_eq!(p.records.len(), 5);
+        assert_eq!(p.records[4].name, "pc.local");
+        // Nothing to normalise in a well-formed packet.
+        assert!(normalize_empty_txt(&announcement()).is_none());
+    }
+
+    #[test]
+    fn an_empty_record_of_another_type_stays_unparsable() {
+        // The A record of the announcement with RDLENGTH 0: garbage, not normalised.
+        let mut raw = empty_txt_announcement(0);
+        let n = raw.len();
+        raw.truncate(n - 6);
+        raw.extend_from_slice(&[0, 0]);
+        assert!(Packet::parse(&raw).is_err());
     }
 
     #[test]
