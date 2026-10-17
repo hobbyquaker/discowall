@@ -584,7 +584,9 @@ mod tests {
         let n = raw.len();
         raw.truncate(n - 6);
         raw.extend_from_slice(&[0, 0]);
-        assert!(Packet::parse(&raw).is_err());
+        let e = Packet::parse(&raw).unwrap_err();
+        // The reason `discoctl watch` and the log show (task 17), hickory-proto 0.26.3's wording.
+        assert!(e.to_string().contains("length 0"), "{e}");
     }
 
     #[test]

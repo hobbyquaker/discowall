@@ -303,7 +303,12 @@ JSON-Objekt (`discoctl rule add --json '{"in":"iot","out":"lan","host":["bridge"
 ```
 
 Das Ergebnis je Zielschnittstelle ist `sent`, `partial` (einige Records verworfen, die Zahl folgt), `dropped`,
-`down` oder bei Einmal-Anfragen `asked` und `relayed`. Die entscheidenden Regeln stehen in Klammern.
+`down` oder bei Einmal-Anfragen `asked` und `relayed`. Die entscheidenden Regeln stehen in Klammern. Ein Paket,
+das schon vor den Regeln verworfen wird, sagt warum: `own-source`, `duplicate` oder `unparsable` mit dem
+Dekodierfehler (`reason` in `--json`); für unlesbare Pakete bekommt das Journal je Quelle und Schnittstelle alle zehn
+Minuten eine Info-Zeile, und `discoctl status` und `stats` zeigen das letzte. Konfiguration und Regeln prüft
+`discowalld --check` ohne etwas zu starten (beide Dateien, so wie der Daemon sie lädt), eine Regeldatei allein
+`discowalld --check --rules <datei>`.
 
 ## Wie es funktioniert
 
@@ -362,7 +367,7 @@ Rust, Aufwandsschätzung, Protokoll der Entscheidungen) steht in
 - 🕵️ OpenWrt-Pakete als Release-Dateien (luci-app `all`, discowall `.ipk`/`.apk` je Architektur aus den musl-Binaries)
 - 🕵️ B-4: ein TXT-Record mit RDLENGTH 0 macht das ganze Paket unlesbar (gefunden auf dem ersten echten Router; Lösung: unverändert weiterleiten, wie avahi)
 - ✅ B-5: `discowalld --check` liest die Regeldatei nicht
-- 🏗️ Sagen, warum ein Paket unlesbar war: der Grund in `discoctl watch` und ein gedrosseltes Info-Log
+- ✅ Sagen, warum ein Paket unlesbar war: der Grund in `discoctl watch` und ein gedrosseltes Info-Log
 - 🏗️ README: den Hinweis „noch auf keinem echten Router gelaufen“ entfernen (erster Lauf auf einem echten Router 2026-10-17)
 - ✅ Konzept: Regelmodell, CLI, Laufzeit mit dem Maintainer besprochen
 

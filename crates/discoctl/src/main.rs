@@ -4,7 +4,7 @@ use anyhow::{bail, Context, Result};
 use clap::{Args as ClapArgs, Parser, Subcommand};
 use discowall_proto::{
     Action, HostView, PacketKind, Proto, Request, Response, RuleList, RuleSpec, ServiceView,
-    StatsView, Status, TestResult, TestSpec, WatchEvent,
+    StatsView, Status, TestResult, TestSpec, UnparsableView, WatchEvent,
 };
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
@@ -388,6 +388,16 @@ fn format_event(ev: &WatchEvent) -> String {
         })
         .collect::<Vec<_>>()
         .join("  ");
+    if let Some(reason) = &ev.reason {
+        return format!(
+            "{h:02}:{m:02}:{s:02}.{:03} {:<4} {:<8} {:<21} {:<10} {reason}",
+            ev.ts_ms % 1000,
+            ev.proto,
+            ev.iface,
+            ev.src,
+            ev.kind,
+        );
+    }
     format!(
         "{h:02}:{m:02}:{s:02}.{:03} {:<4} {:<8} {:<21} {:<10} {:<40} -> {}",
         ev.ts_ms % 1000,
@@ -432,6 +442,7 @@ fn print_stats(st: &StatsView) {
         "dropped: own-source {}  duplicate {}  unparsable {}  by-rules {}  unknown-interface {}  records {}  send-errors {}",
         c.dropped_own_source, c.dropped_duplicate, c.dropped_unparsable, c.dropped_by_rules, c.dropped_unknown_interface, c.records_dropped, c.send_errors
     );
+    print_last_unparsable(st.last_unparsable.as_ref());
     println!("{:<12} {:>10} {:>10}", "interface", "rx", "tx");
     for i in &st.interfaces {
         println!("{:<12} {:>10} {:>10}", i.name, i.rx, i.tx);
@@ -483,6 +494,16 @@ fn print_status(s: &Status) {
         "rx {}  tx {}  dropped: own-source {}  duplicate {}  unparsable {}  by-rules {}  unknown-interface {}  records-dropped {}  send-errors {}",
         c.rx, c.tx, c.dropped_own_source, c.dropped_duplicate, c.dropped_unparsable, c.dropped_by_rules, c.dropped_unknown_interface, c.records_dropped, c.send_errors
     );
+    print_last_unparsable(s.last_unparsable.as_ref());
+}
+
+fn print_last_unparsable(u: Option<&UnparsableView>) {
+    if let Some(u) = u {
+        println!(
+            "last unparsable: {} from {} on {}, {}s ago: {}",
+            u.proto, u.src, u.iface, u.ago_s, u.reason
+        );
+    }
 }
 
 fn print_rules(l: &RuleList) {

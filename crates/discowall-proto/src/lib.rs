@@ -77,6 +77,8 @@ pub struct Status {
     pub config_path: String,
     pub interfaces: Vec<InterfaceStatus>,
     pub counters: Counters,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_unparsable: Option<UnparsableView>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -463,6 +465,20 @@ pub struct WatchEvent {
     /// One entry per target interface.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub out: Vec<WatchDecision>,
+    /// Why a packet was dropped before the rules, when the kind alone does not say it: the decode
+    /// error of an `unparsable` packet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// The most recent packet that could not be decoded (`status`, `stats`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct UnparsableView {
+    pub proto: Proto,
+    pub iface: String,
+    pub src: String,
+    pub reason: String,
+    pub ago_s: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -505,6 +521,8 @@ pub struct StatsView {
     pub default_hits: u64,
     pub hosts: usize,
     pub instances: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_unparsable: Option<UnparsableView>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]

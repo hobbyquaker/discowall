@@ -12,7 +12,7 @@ use crate::ssdp::{SsdpKind, SsdpMessage};
 use anyhow::{Context, Result};
 use discowall_proto::{
     Action, Counters, InterfaceStats, InterfaceStatus, PacketKind, Request, Response, RuleSet,
-    RuleStats, StatsView, Status, TestResult, TestSpec, WatchDecision, WatchEvent,
+    RuleStats, StatsView, Status, TestResult, TestSpec, UnparsableView, WatchDecision, WatchEvent,
 };
 use hickory_proto::op::Message;
 use std::collections::hash_map::DefaultHasher;
@@ -50,6 +50,12 @@ pub struct Reflector {
     dedup: HashMap<u64, Instant>,
     dedup_window: Duration,
     dedup_sweep: Instant,
+    /// The most recent undecodable packet: (when, protocol, interface, source, reason).
+    last_unparsable: Option<(Instant, Proto, String, String, String)>,
+    /// Per (source address, interface): when the last info line about an undecodable packet was
+    /// written and how many were suppressed since (task 17).
+    unparsable_log: HashMap<(IpAddr, String), (Instant, u64)>,
+    unparsable_log_window: Duration,
     chain: Chain,
     /// The chain differs from the rules file (edited over the socket, not saved).
     unsaved: bool,
@@ -162,6 +168,9 @@ impl Reflector {
             dedup: HashMap::new(),
             dedup_window: Duration::from_millis(config.dedup_window_ms),
             dedup_sweep: Instant::now(),
+            last_unparsable: None,
+            unparsable_log: HashMap::new(),
+            unparsable_log_window: Duration::from_secs(600),
             chain,
             unsaved: false,
             hosts: HostTable::default(),
@@ -469,6 +478,91 @@ impl Reflector {
         }
     }
 
+    /// An undecodable packet (task 17): counted, remembered for `status`/`stats`, shown with its
+    /// reason in `watch`, and logged at info at most once per source and interface per window,
+    /// with the number suppressed since.
+    fn unparsable(&mut self, in_iface: &str, pkt: &Received, reason: String) {
+        self.counters.dropped_unparsable += 1;
+        let now = Instant::now();
+        debug!(iface = %in_iface, src = %pkt.src, len = pkt.data.len(), "unparsable, dropped: {reason}");
+        if let Some(suppressed) = self.unparsable_log_due(pkt.src.ip(), in_iface, now) {
+            let more = if suppressed > 0 {
+                format!(" ({suppressed} more from there since the last report)")
+            } else {
+                String::new()
+            };
+            info!(
+                "unparsable {} packet from {} on {in_iface}, dropped: {reason}{more}",
+                pkt.proto, pkt.src
+            );
+        }
+        self.last_unparsable = Some((
+            now,
+            pkt.proto,
+            in_iface.to_string(),
+            pkt.src.to_string(),
+            reason.clone(),
+        ));
+        if self.events.receiver_count() > 0 {
+            let ts_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            let _ = self.events.send(WatchEvent {
+                ts_ms,
+                proto: pkt.proto,
+                iface: in_iface.to_string(),
+                src: pkt.src.to_string(),
+                len: pkt.data.len(),
+                kind: "unparsable".into(),
+                services: vec![],
+                instances: vec![],
+                hosts: vec![],
+                out: vec![],
+                reason: Some(reason),
+            });
+        }
+    }
+
+    /// `Some(suppressed)` when an info line is due for this source and interface, `None` while the
+    /// window since the last one is running (then the suppressed count grows).
+    fn unparsable_log_due(&mut self, src: IpAddr, iface: &str, now: Instant) -> Option<u64> {
+        let window = self.unparsable_log_window;
+        if self.unparsable_log.len() > 1024 {
+            self.unparsable_log
+                .retain(|_, (t, _)| now.duration_since(*t) < window);
+        }
+        match self.unparsable_log.get_mut(&(src, iface.to_string())) {
+            Some((last, suppressed)) if now.duration_since(*last) < window => {
+                *suppressed += 1;
+                None
+            }
+            Some((last, suppressed)) => {
+                let n = *suppressed;
+                *last = now;
+                *suppressed = 0;
+                Some(n)
+            }
+            None => {
+                self.unparsable_log
+                    .insert((src, iface.to_string()), (now, 0));
+                Some(0)
+            }
+        }
+    }
+
+    fn last_unparsable_view(&self) -> Option<UnparsableView> {
+        self.last_unparsable
+            .as_ref()
+            .map(|(t, proto, iface, src, reason)| UnparsableView {
+                proto: *proto,
+                iface: iface.clone(),
+                src: src.clone(),
+                reason: reason.clone(),
+                ago_s: t.elapsed().as_secs(),
+            })
+    }
+
     fn emit(
         &self,
         in_iface: &str,
@@ -495,6 +589,7 @@ impl Reflector {
             instances: parsed.map(|p| p.instances()).unwrap_or_default(),
             hosts: parsed.map(|p| p.hosts()).unwrap_or_default(),
             out,
+            reason: None,
         };
         let _ = self.events.send(ev);
     }
@@ -531,9 +626,7 @@ impl Reflector {
         let parsed = match Packet::parse(&pkt.data) {
             Ok(p) => p,
             Err(e) => {
-                self.counters.dropped_unparsable += 1;
-                debug!(iface = %in_name, src = %pkt.src, len = pkt.data.len(), "unparsable, dropped: {e}");
-                self.emit(&in_name, &pkt, "unparsable".into(), None, vec![]);
+                self.unparsable(&in_name, &pkt, e.to_string());
                 return vec![];
             }
         };
@@ -796,9 +889,7 @@ impl Reflector {
         let msg = match SsdpMessage::parse(&pkt.data) {
             Ok(m) => m,
             Err(e) => {
-                self.counters.dropped_unparsable += 1;
-                debug!(iface = %in_name, src = %pkt.src, len = pkt.data.len(), "ssdp unparsable, dropped: {e}");
-                self.emit_ssdp(in_name, &pkt, "unparsable".into(), None, vec![]);
+                self.unparsable(in_name, &pkt, e.to_string());
                 return vec![];
             }
         };
@@ -1064,6 +1155,7 @@ impl Reflector {
                 .into_iter()
                 .collect(),
             out,
+            reason: None,
         };
         let _ = self.events.send(ev);
     }
@@ -1182,6 +1274,7 @@ impl Reflector {
                 })
                 .collect(),
             default_hits: self.chain.default_hits,
+            last_unparsable: self.last_unparsable_view(),
             hosts,
             instances,
         }
@@ -1240,6 +1333,7 @@ impl Reflector {
                 })
                 .collect(),
             counters: self.counters.clone(),
+            last_unparsable: self.last_unparsable_view(),
         }
     }
 }
@@ -1527,6 +1621,42 @@ mod tests {
         assert_eq!(to, vec!["iot", "guest"]);
         assert_eq!(sock.take(), vec![(q.clone(), 11), (q, 12)]);
         assert_eq!(r.counters.tx, 2);
+    }
+
+    #[test]
+    fn unparsable_says_why_in_watch_status_and_a_limited_log() {
+        let (mut r, _sock, _d) = setup(ACCEPT_ALL);
+        r.unparsable_log_window = Duration::from_millis(100);
+        let mut events = r.events.subscribe();
+        assert!(r.on_packet(packet(10, "10.0.0.7", b"not dns")).is_empty());
+        let ev = events.try_recv().unwrap();
+        assert_eq!(ev.kind, "unparsable");
+        let reason = ev.reason.expect("the decode error");
+        assert!(!reason.is_empty());
+        let last = r.status().last_unparsable.expect("remembered");
+        assert_eq!(
+            (last.iface.as_str(), last.src.as_str()),
+            ("lan", "10.0.0.7:5353")
+        );
+        assert_eq!(last.reason, reason);
+        assert_eq!(r.stats().last_unparsable, Some(last));
+
+        // The SSDP path says why too.
+        r.on_packet(ssdp_packet(10, "10.0.0.8", 1900, "garbage\r\n\r\n"));
+        let ev = events.try_recv().unwrap();
+        assert_eq!((ev.kind.as_str(), ev.proto), ("unparsable", Proto::Ssdp));
+        assert!(ev.reason.is_some());
+
+        // The info line: once per source and interface per window, then with the count since.
+        let ip: IpAddr = "10.0.0.9".parse().unwrap();
+        let t = Instant::now();
+        assert_eq!(r.unparsable_log_due(ip, "lan", t), Some(0));
+        assert_eq!(r.unparsable_log_due(ip, "lan", t), None);
+        assert_eq!(r.unparsable_log_due(ip, "lan", t), None);
+        assert_eq!(r.unparsable_log_due(ip, "iot", t), Some(0), "per interface");
+        let later = t + Duration::from_millis(150);
+        assert_eq!(r.unparsable_log_due(ip, "lan", later), Some(2));
+        assert_eq!(r.unparsable_log_due(ip, "lan", later), None);
     }
 
     #[test]
