@@ -2,10 +2,8 @@
 
 The newest five dated entries; older ones move to `handoff-archive/<date>.md`.
 
-**Last session 2026-10-13** (the maintainer: "continue with our roadmap. you may create lxc containers on my proxmox
-for testing"; later "file task: lucy gui for openwrt package. do research for pfsense ui and file another task for
-that"). Everything is committed locally; **nothing pushed** (D-9: the maintainer pushes). The lab containers (900–904) and the
-OpenWrt VM (905) are on the node and stay (see *Cold start*).
+**Last session 2026-10-17** (the maintainer: "refine b4 … forward as-is", then "fix/implement B4, B5, Task-17,
+Task-18, release 0.0.3"). `master` and `v0.0.3` are pushed; the lab guests 900–905 are on the node and stay.
 
 ## Cold start (read this first)
 
@@ -42,6 +40,10 @@ OpenWrt VM (905) are on the node and stay (see *Cold start*).
   test, green in CI). B-1, B-2, B-3 ✅ (found and fixed in
   the lab, see below). 13 (LuCI app) 🕵️: built and tested on an OpenWrt 24.10.8 VM in the lab (36/36, with the pages in a browser), see its item; 14 (pfSense package + UI), 15 (IGMP snooping without querier) 🤷 for the
   maintainer; 7, 9 💤.
+- **Released as v0.0.3 on 2026-10-17:** B-4 (empty TXT read as one empty string, packet forwarded as-is), B-5
+  (`--check` checks the rules file; `--check --rules <file>`), task 17 (the reason of an unparsable packet in watch,
+  status/stats and a rate-limited info log), task 18 (the README caution is a note). OpenWrt packages built by the
+  release workflow itself for the first time on a tag.
 - **Released as v0.0.2 on 2026-10-13:** B-1, B-2, B-3; `discoctl rule add|insert --json`; UCI-rendered OpenWrt config;
   `luci-app-discowall`; the avahi namespace test, run by CI. Since task 16 the release also carries the OpenWrt
   packages (`.ipk` 24.10, `.apk` 25.x, the D-14 architectures, unsigned), built from the release binaries.
@@ -54,6 +56,22 @@ OpenWrt VM (905) are on the node and stay (see *Cold start*).
   --all` first); after a directory rename `touch crates/discowalld/tests/netns.rs` (the test binary embeds absolute
   paths — cost an hour on 2026-10-13); the README's Roadmap list is hand-maintained in both languages; SSDP over IPv6 is implemented but only v4-tested; the `discowalld --version` string is the
   workspace version, so dev debs (`--deb-version 0.0.2~dev2`) still say 0.0.1.
+
+## 2026-10-17 (release) — v0.0.3: B-4, B-5, tasks 17 and 18 from the first real-router run
+
+- **B-4 🕵️:** `normalize_empty_txt` (`packet.rs`) parses a copy in which each RDLENGTH-0 TXT carries one zero byte,
+  with every compression pointer behind an insertion moved; the original bytes are forwarded when nothing is dropped,
+  a rebuild carries the TXT as one zero byte (avahi's behaviour, read in its source). Measured in the lab: the
+  hand-built announcement crosses the router byte-identical, `unparsable` 0. Waits for the real router (Quest Link
+  visible outside its segment).
+- **B-5 ✅:** `--check` runs `check_rules` (same load + compile as start/apply); `--check --rules <file>`.
+- **Task 17 ✅:** `Reflector::unparsable`: watch `reason`, `last_unparsable` in status/stats, info once per source
+  and interface per 10 min with the suppressed count; mDNS and SSDP.
+- **Task 18 ✅** on the maintainer's word (overriding the item's "hold a few days"): the caution is a `[!NOTE]`; the
+  wording is the session's, the maintainer may change it.
+- **Release v0.0.3:** version bumped (workspace, path deps, three OpenWrt Makefiles, README install URLs, lab docs);
+  lab: nine cases green on the 0.0.3 deb incl. upgrade from the 0.0.2 release; CI green incl. the avahi test; tag on
+  f6c3607; the release workflow builds tarballs, deb, rpm and the OpenWrt ipk/apk.
 
 ## 2026-10-17 — first real-router run of 0.0.2; B-4, B-5, tasks 17 and 18 filed
 
@@ -118,25 +136,3 @@ OpenWrt VM (905) are on the node and stay (see *Cold start*).
   1900/5353 — READMEs); the lab's IGMP querier died for iot after the dynamics case (fixed).
 - **For the maintainer:** OpenWrt **25.12.5** is the latest stable today, D-12 says target it (the lab ran 24.10.8
   as the Q&A named). Details and the open points in [task 13](roadmap/task-13.md).
-
-## 2026-10-13 — the Proxmox lab built and run, four bugs found and fixed, task 10 measured, tasks 12–15
-
-- **Lab** (task 11): created the four containers with `lab-create.sh` (one fix on the way: no `ip6=auto` on the
-  management interface, ifupdown2 waits forever for DHCPv6), provisioned avahi/gupnp-tools/miniupnpc/minidlna/
-  python-zeroconf, wrote `lab.py` with the nine cases of the research and a lab README. Decisions taken by the session
-  (changeable): fresh VLAN tags, `pct exec` through the node instead of SSH into containers, a fourth container for
-  the guest network.
-- **Found in the lab, fixed, verified there:** B-1 ANSI codes in the journal; B-2 the dedup dropped avahi's IPv4
-  query because its IPv6 twin had the same bytes (the namespace test sends the families 500 ms apart and never saw it);
-  B-3 `discoctl save` impossible under the shipped unit (`ProtectSystem=strict`) — discoctl writes the file now.
-  Fourth finding, not a bug of ours: **task 15** — the node's bridge snoops IGMP without a querier, SSDP memberships
-  expired after 260 s and the `ssdp` case failed whenever it ran a few minutes after a daemon start, while mDNS
-  (224.0.0.0/24, flooded by Linux bridges) never noticed. The lab now runs an IGMP querier on the router.
-- **Task 10 ✅:** coexistence measured (multicast reaches both daemons; unicast to 5353 reaches the socket bound last;
-  avahi's reflector beside discowall causes no storm), research 3.1 marked [measured].
-- **Task 12 🕵️:** `avahi_between_namespaces` — avahi with its own D-Bus in each leaf and beside the daemon in the
-  router namespace; needed a bind-mounted passwd/group with `avahi` as uid 0 (avahi insists its runtime dir belongs to
-  its user). Passes in the lab container; CI installs avahi; waits for the maintainer's push.
-- **Tasks 13, 14, 15 filed** with [notes/web-ui-research.md](notes/web-ui-research.md): LuCI app (client-side JS +
-  a ucode rpcd plugin over `discoctl --json`), pfSense package + UI (two FreeBSD ports, packagegui descriptor, prior
-  art `pfSense-pkg-mDNS-Bridge`; OPNsense plugin as the alternative; blocked by task 9), IGMP snooping.
