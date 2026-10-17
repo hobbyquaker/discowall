@@ -353,7 +353,7 @@ estimate, record of the decisions) is in [mdns-router-research.md](mdns-router-r
 - 🤷 pfSense package and web UI (FreeBSD port, packagegui, rules page; OPNsense plugin to be decided)
 - 🤷 IGMP snooping without a querier kills SSDP minutes after start (measured on a Linux bridge): document, or refresh memberships, or be the querier
 - 🕵️ OpenWrt packages as release assets (luci-app `all`, discowall `.ipk`/`.apk` per architecture from the musl binaries)
-- 🤷 B-4: a TXT record with RDLENGTH 0 makes the whole packet unparsable (found on the first real router)
+- ☑️ B-4: a TXT record with RDLENGTH 0 makes the whole packet unparsable (found on the first real router; fix: forward as-is, as avahi does)
 - ☑️ B-5: `discowalld --check` does not read the rules file
 - ☑️ Say why a packet was unparsable: the reason in `discoctl watch` and a rate-limited info log
 - ☑️ README: drop the "not run on a real router yet" caution (first real-router run 2026-10-17)

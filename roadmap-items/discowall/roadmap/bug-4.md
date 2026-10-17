@@ -1,4 +1,4 @@
-## B-4. A TXT record with RDLENGTH 0 makes the whole packet unparsable (hickory InvalidEmptyRecord) 🤷
+## B-4. A TXT record with RDLENGTH 0 makes the whole packet unparsable (hickory InvalidEmptyRecord) ☑️
 
 **Created** 2026-10-17.
 
@@ -28,3 +28,32 @@ zero byte, an empty TXT record and no TXT record as equivalent. A reflector shou
 - or the own parser that `packet.rs` already keeps the door open for (research 3.3).
 
 Whatever the fix: a unit test with a hand-built packet (PTR + SRV + empty TXT + A), not captured lab data.
+
+**Refined 2026-10-17 (maintainer: "i would say we should forward as-is, as avahi reflector does also").**
+
+**What avahi does — read from its source** (`avahi/avahi` master, 2026-10-17): `avahi-core/dns.c` parses a TXT with
+`rdlength == 0` as an empty string list instead of failing; the reflector (`avahi-core/server.c`, `reflect_response`)
+re-emits record by record, and `avahi-common/strlst.c` serialises an empty list as a single NUL byte ("to comply with
+section 6.1 of the DNS-SD spec"). So avahi keeps the record and forwards it normalised, never drops the packet.
+
+**Decision for the fix:** the packet is forwarded, not dropped. discowall already sends the **original bytes** when
+the rules drop nothing (`filter()` in `reflector.rs`: `dropped == 0 && link_local == 0 && !qu` → `original.to_vec()`),
+so only the parse has to succeed:
+
+- **Lenient pre-pass, classification only.** When `Message::from_vec` fails, walk the wire format once; for every
+  record with TYPE TXT and RDLENGTH 0, make a **copy** with RDLENGTH 1 and one zero byte inserted, adjusting every
+  compression pointer that targets an offset after an insertion point. Parse the copy. Record order and indices are
+  unchanged, so the rule verdicts (`keep_r`) apply to the original packet one to one.
+- **Forwarded as-is** when nothing is dropped: the original bytes, empty TXT and all — more literal than avahi.
+- **Rebuilt** when the rules drop records, a link-local address is stripped or the QU bit is cleared: the rebuild
+  comes from the parsed copy, so the TXT goes out as a single zero byte — exactly avahi's output and RFC 6763 §6.1's
+  equivalent form.
+- **Only TXT.** An RDLENGTH-0 record of another type stays unparsable (a one-byte A or SRV would be garbage); task 17
+  makes the reason visible. If a later hickory-proto accepts an empty TXT, the pre-pass goes; note the version checked.
+- **Counters:** the packet no longer counts as `unparsable`; a debug log line says an empty TXT was normalised.
+- **Tests:** unit tests with hand-built packets (D-9: no captured lab data) — PTR + SRV + empty TXT + A forwarded
+  byte-identical under accept-all; the same with a rule dropping the A record → rebuilt, TXT as `\x00`; an empty TXT
+  behind a compression pointer that must be shifted; two empty TXTs in one packet; an empty A record still unparsable.
+  Then the real-router check of task 18: the Quest Link service becomes visible outside its segment.
+
+Effort: half a day. ☑️ 2026-10-17.
